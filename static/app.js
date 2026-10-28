@@ -12,7 +12,7 @@ const scopes = {
 };
 const providerLabels = { all: '全部代理工具', codex: 'Codex', claude: 'Claude Code', opencode: 'OpenCode', zcode: 'Z Code' };
 const originLabels = { all: '全部 Paseo 关联', paseo: '已关联 Paseo', other: '未关联 Paseo' };
-const rangeLabels = { '1': '今天', '7': '最近 7 天', '30': '最近 30 天', '90': '最近 90 天', all: '全部时间', custom: '自选日期' };
+const rangeLabels = { '1': '今天', '3': '最近 3 天', '7': '最近 7 天', '30': '最近 30 天', '90': '最近 90 天', all: '全部时间', custom: '自选日期' };
 const categoryLabels = { main: '主对话', agent: '子代理', review: '自动审批', main_tokens: '主对话', agent_tokens: '子代理', review_tokens: '自动审批' };
 const n = (value) => Number.isFinite(Number(value)) ? Number(value) : 0;
 const exact = (value) => integer.format(n(value));
@@ -23,7 +23,7 @@ const known = (value) => value !== null && value !== undefined && Number.isFinit
 const speed = (value) => known(value) ? Number(value).toFixed(1) : '—';
 const average = (item) => item.average_turn_tps ?? item.output_tps;
 const samples = (item) => Array.isArray(item.speed_samples) ? item.speed_samples.length : n(item.speed_samples);
-const state = { data: null, applied: null, days: '7', scope: 'task', model: 'all', provider: 'all', origin: 'all', start: '', end: '', search: '', sort: 'tokens', numberFormat: 'compact', chartMetric: 'total', speedMetric: 'average_turn_tps', hourMetric: 'total_tokens', modelMetric: 'total', autoRefresh: true, expanded: new Set(), expandedTurns: new Set(), requestId: 0, controller: null, loading: false, draftDates: false };
+const state = { data: null, applied: null, days: '7', scope: 'task', model: 'all', provider: 'all', origin: 'all', start: '', end: '', search: '', sort: 'tokens', numberFormat: 'compact', chartMetric: 'total', speedMetric: 'average_turn_tps', speedModel: 'follow', hourMetric: 'total_tokens', modelMetric: 'total', autoRefresh: true, expanded: new Set(), expandedTurns: new Set(), requestId: 0, controller: null, loading: false, draftDates: false };
 const live = { data: null, requestId: 0, controller: null, loading: false, error: '', nodes: new Map() };
 try {
   const saved = JSON.parse(localStorage.getItem('codex-pulse-preferences-v2') || '{}');
@@ -98,6 +98,13 @@ function renderContext(data) {
   if (state.model !== 'all' && !available.includes(state.model)) available.push(state.model);
   $('model-select').innerHTML = '<option value="all">全部模型</option>' + available.sort().map((model) => `<option value="${esc(model)}">${esc(model)}</option>`).join('');
   $('model-select').value = state.model;
+  const trendModels = [...new Set(data.filters?.available_models || [])].filter(Boolean).sort();
+  const selectedModel = state.speedModel.startsWith('model:') ? state.speedModel.slice(6) : null;
+  const reset = selectedModel && !trendModels.includes(selectedModel);
+  if (reset) state.speedModel = 'follow';
+  $('speed-model-select').innerHTML = '<option value="follow">跟随全局模型</option><option value="all">全部模型</option>' + trendModels.map((model) => `<option value="${esc('model:' + model)}">${esc(model)}</option>`).join('');
+  $('speed-model-select').value = state.speedModel;
+  if (reset) state.speedModelReset = true;
   updateExport();
 }
 function updateExport() {
@@ -187,7 +194,12 @@ function renderChart(data) {
   $('daily-chart').innerHTML = markup + '</svg>';
 }
 function renderSpeedTrend(data) {
-  const days = data.daily || [], field = state.speedMetric;
+  const field = state.speedMetric;
+  const modelLabel = state.speedModel === 'follow' ? `跟随全局模型（${state.applied.model === 'all' ? '全部模型' : state.applied.model}）` : state.speedModel === 'all' ? '全部模型' : state.speedModel.slice(6);
+  const series = state.speedModel === 'all' ? data.speed_trends.all : state.speedModel.startsWith('model:') ? (data.speed_trends.models[state.speedModel.slice(6)] || []) : data.daily;
+  const byDate = new Map(series.map((day) => [day.date, day]));
+  const days = (data.daily || []).map((day) => byDate.get(day.date) || {date: day.date});
+  text('speed-model-context', `${state.speedModelReset ? '原趋势模型不在当前范围内，已回到跟随全局模型。 ' : ''}${modelLabel} · ${data.range.start} 至 ${data.range.end}${state.speedModel.startsWith('model:') ? ' · 仅完整单模型轮次' : ''}`);
   const label = field === 'combined_tps' ? '合计吞吐' : '平均轮次速度';
   document.querySelectorAll('[data-speed-metric]').forEach((button) => { const active = button.dataset.speedMetric === field; button.classList.toggle('selected', active); button.setAttribute('aria-pressed', String(active)); });
   if (!days.some((day) => known(day[field]))) {
@@ -211,7 +223,7 @@ function renderSpeedTrend(data) {
     if (known(day[field])) {
       const y = top + plotHeight * (1 - Number(day[field]) / max);
       if (previous) markup += `<line class="speed-trend-line" x1="${previous.x}" y1="${previous.y}" x2="${x}" y2="${y}"/>`;
-      const description = `${day.date}：${label} ${speed(day[field])} tok/s；${amount(samples(day))} 个速度样本`;
+      const description = `${modelLabel} · ${day.date}：${label} ${speed(day[field])} tok/s；${amount(samples(day))} 个速度样本`;
       points += `<circle class="speed-trend-point" cx="${x}" cy="${y}" r="4" tabindex="0" role="img" aria-label="${esc(description)}"><title>${esc(description)}</title></circle>`;
       previous = { x, y };
     } else previous = null;
@@ -582,6 +594,7 @@ $('filters-form').addEventListener('submit', (event) => { event.preventDefault()
 $('number-format').addEventListener('change', (event) => { state.numberFormat = event.target.value; savePreferences(); if (state.data) { renderSummary(state.data); renderSpeedTrend(state.data); renderHourly(state.data); renderWeek(state.data); renderModels(state.data); renderSessions(); } renderLive(); });
 $('model-metric').addEventListener('change', (event) => { state.modelMetric = event.target.value; savePreferences(); if (state.data) renderModels(state.data); });
 document.querySelectorAll('[data-chart-metric]').forEach((button) => button.addEventListener('click', () => { state.chartMetric = button.dataset.chartMetric; savePreferences(); if (state.data) renderChart(state.data); }));
+$('speed-model-select').addEventListener('change', (event) => { state.speedModel = event.target.value; state.speedModelReset = false; if (state.data) renderSpeedTrend(state.data); });
 document.querySelectorAll('[data-speed-metric]').forEach((button) => button.addEventListener('click', () => { state.speedMetric = button.dataset.speedMetric; if (state.data) renderSpeedTrend(state.data); }));
 document.querySelectorAll('[data-hour-metric]').forEach((button) => button.addEventListener('click', () => { state.hourMetric = button.dataset.hourMetric; if (state.data) renderHourly(state.data); }));
 $('refresh-button').addEventListener('click', () => { loadLive(); if (state.draftDates) { state.start = $('start-date').value; state.end = $('end-date').value; } if (validDates()) { state.draftDates = false; savePreferences(); loadData(); } });

@@ -371,6 +371,24 @@ class HTTPV2Tests(TurnFixture):
             self.get("/api/export.csv", type="not-a-table")
         self.assertEqual(error.exception.code, 400)
 
+    def test_three_day_range_matches_stats_and_all_csv_exports(self):
+        self.write_turn("outside", end="2026-10-19T02:00:10Z", output=90)
+        for day in (20, 21, 22):
+            self.write_turn(f"day-{day}", end=f"2026-10-{day}T02:00:10Z", output=day)
+        _, raw, _ = self.get(days="3")
+        snapshot = json.loads(raw)
+        self.assertEqual(snapshot["range"], {"start": "2026-10-20", "end": "2026-10-22", "days": "3"})
+        self.assertEqual(snapshot["summary"]["output_tokens"], 63)
+        self.assertEqual([row["date"] for row in snapshot["daily"]],
+                         ["2026-10-20", "2026-10-21", "2026-10-22"])
+        for table in ("sessions", "daily", "turns"):
+            with self.subTest(table=table):
+                _, raw, _ = self.get("/api/export.csv", type=table, days="3")
+                rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"))))
+                self.assertEqual(len(rows), 1 if table == "sessions" else 3)
+                self.assertEqual(sum(int(row["输出Token"]) for row in rows), 63)
+                self.assertTrue(all(row["开始日期"] == "2026-10-20" and row["结束日期"] == "2026-10-22" for row in rows))
+
     def test_http_csv_exports_match_same_scope_model_and_custom_date_filters(self):
         self.write_turn("main", output=300)
         self.write_turn("agent", output=60, model="model-b", source={"subagent": {"thread_spawn": {}}})

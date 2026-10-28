@@ -96,6 +96,36 @@ class StatisticsTests(RolloutTestCase):
         self.assertEqual(week['current']['average_turn_tps'], 0)
         self.assertIsNone(week['change_pct']['average_turn_tps'])
 
+    def test_speed_trends_ignore_global_model_and_exclude_mixed_from_model_series(self):
+        rows = [meta('a'), *self.turn('a', 'one', '2026-10-19T00:00:00Z', 60, duration=60),
+                *self.turn('a', 'parallel', '2026-10-19T00:00:00Z', 120, duration=60),
+                *self.turn('a', 'zero', '2026-10-20T00:00:00Z', 0, duration=60),
+                *self.turn('a', 'b', '2026-10-19T00:03:00Z', 30, model='model-b')]
+        a = modern('mix-a', tokens(100, 10), sid='a', turn='mix', at='2026-10-19T00:04:00Z')
+        b = modern('mix-b', tokens(100, 20), sid='a', turn='mix', at='2026-10-19T00:04:01Z')
+        a['payload']['model'] = 'model-a'; b['payload']['model'] = 'model-b'
+        rows += [a, b, complete('mix', 60000, at='2026-10-19T00:05:00Z')]
+        self.write('a.jsonl', rows)
+        now = datetime(2026, 10, 21, 4, tzinfo=timezone.utc)
+        whole = self.snapshot_at(now, days='7')
+        filtered = self.snapshot_at(now, days='7', model='model-b')
+        self.assertEqual(whole['speed_trends'], filtered['speed_trends'])
+        self.assertEqual(filtered['summary']['output_tokens'], 50)
+        self.assertEqual(sum(h['output_tokens'] for h in filtered['hourly']), 50)
+        trends = whole['speed_trends']
+        all_days = {row['date']: row for row in trends['all']}
+        for day in whole['daily']:
+            if day['speed_samples']:
+                for field in ('speed_samples', 'average_turn_tps', 'combined_tps'):
+                    self.assertEqual(all_days[day['date']][field], day[field])
+        a_days = {row['date']: row for row in trends['models']['model-a']}
+        self.assertEqual((a_days['2026-10-19']['speed_samples'], a_days['2026-10-19']['average_turn_tps'],
+                          a_days['2026-10-19']['combined_tps']), (2, 1.5, 3))
+        self.assertEqual((a_days['2026-10-20']['speed_samples'], a_days['2026-10-20']['average_turn_tps']), (1, 0))
+        self.assertNotIn('2026-10-21', a_days)
+        self.assertEqual(trends['models']['model-b'][0]['speed_samples'], 1)
+        self.assertEqual(self.snapshot_at(now, days='7', provider='claude')['speed_trends'], {'all': [], 'models': {}})
+
     def test_scope_model_provider_origin_filters(self):
         self.write('a.jsonl', [meta('a'), *self.turn('a', 'a', '2026-10-19T00:00:00Z', 10)])
         self.write('b.jsonl', [meta('b', source={'subagent': {'thread_spawn': {}}}),

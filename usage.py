@@ -384,8 +384,8 @@ class UsageIndex:
 
     def snapshot(self, days="7", now=None, scope="task", model="all", start=None, end=None, turn_limit=100, provider="all", origin="all"):
         self.validate_sources(provider, origin)
-        if days not in ("1", "7", "30", "90", "all", "custom"):
-            raise ValueError("日期范围必须为 1、7、30、90、all 或 custom")
+        if days not in ("1", "3", "7", "30", "90", "all", "custom"):
+            raise ValueError("日期范围必须为 1、3、7、30、90、all 或 custom")
         self.validate_sources(provider, origin)
         if scope not in SCOPES:
             raise ValueError("统计范围必须为 task、all、main、agent 或 review")
@@ -602,6 +602,7 @@ class UsageIndex:
         def in_range(timestamp):
             return start_date <= datetime.fromtimestamp(timestamp, self.tz).date() <= end_date
         summary = blank(); sessions = {}; daily = {}; models = {}
+        speed_all = {}; speed_models = defaultdict(dict)
         hourly = [{"hour": hour, **usage({}), "request_count": 0} for hour in range(24)]
         local_now = now.astimezone(self.tz)
         monday = today - timedelta(days=today.weekday())
@@ -671,9 +672,17 @@ class UsageIndex:
             if not scope_matches(sid) or completion["timestamp"] > now.timestamp():
                 continue
             turn = turns.get(key)
-            if not turn or (model != "all" and model not in turn["models"]):
+            if not turn:
                 continue
             turn_models = turn["models"]
+            if in_range(completion["timestamp"]):
+                speed_day = str(datetime.fromtimestamp(completion["timestamp"], self.tz).date())
+                add_speed(speed_all.setdefault(speed_day, blank()), completion, turn["output"])
+                if len(turn_models) == 1:
+                    model_days = speed_models[next(iter(turn_models))]
+                    add_speed(model_days.setdefault(speed_day, blank()), completion, turn["output"])
+            if model != "all" and model not in turn_models:
+                continue
             week = week_target(completion["timestamp"])
             if week is not None and (model == "all" or len(turn_models) == 1):
                 add_speed(week, completion, turn["output"])
@@ -742,6 +751,15 @@ class UsageIndex:
             day["session_count"] = len(day.pop("_sessions")); finish(day)
         for model_row in models.values():
             finish(model_row)
+        def speed_series(days):
+            rows = []
+            for date, target in sorted(days.items()):
+                finish(target)
+                rows.append({"date": date, **{field: target[field] for field in
+                    ("average_turn_tps", "combined_tps", "speed_samples")}})
+            return rows
+        speed_trends = {"all": speed_series(speed_all),
+                        "models": {name: speed_series(days) for name, days in speed_models.items()}}
         summary.update(session_count=len(grouped), thread_count=len(sessions), today_tokens=today_tokens, **breakdown)
         finish(summary)
         week_rows = []
@@ -777,7 +795,7 @@ class UsageIndex:
                     "coverage": {"earliest_date": str(min(coverage_dates)) if coverage_dates else None,
                                  "latest_date": str(max(coverage_dates)) if coverage_dates else None,
                                  "matched_threads": len({event["thread_id"] for event in matched_events}), "scope": scope}},
-                "summary": summary, "daily": list(daily.values()), "hourly": hourly, "week_over_week": week_over_week,
+                "summary": summary, "daily": list(daily.values()), "speed_trends": speed_trends, "hourly": hourly, "week_over_week": week_over_week,
                 "sessions": sorted(grouped.values(), key=lambda s: s["total_tokens"], reverse=True),
                 "threads": sorted(sessions.values(), key=lambda s: s["total_tokens"], reverse=True),
                 "models": sorted(models.values(), key=lambda m: m["total_tokens"], reverse=True)}
