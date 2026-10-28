@@ -4,6 +4,26 @@
 
 A local, read-only usage and speed dashboard for Codex, Claude Code and OpenCode, with Paseo session association. It shows daily usage, historical turn speeds, main conversation and subagent contributions, and recently active conversations. The dashboard interface is currently in Chinese; this document provides English instructions. Both the page and backend run on your own computer, and the source package contains no real conversation data.
 
+## Interface preview
+
+These screenshots use synthetic data. Their numbers are illustrative and are not real usage records or performance benchmarks. The interface is currently in Chinese.
+
+**Usage overview** · See today's and cumulative usage, input and output, and filters.
+
+![Usage overview with synthetic data](docs/images/overview.jpg)
+
+**Usage trends** · Explore daily changes, the input and output breakdown, and model distribution.
+
+![Usage trends with synthetic data](docs/images/usage-trends.jpg)
+
+**Live speed** · See recently active conversations and subagents, with the current-turn average and the recorded rate over the last 60 seconds.
+
+![Live speed with synthetic data](docs/images/live-speed.jpg)
+
+**Conversation details** · Expand a conversation to inspect contributions and the basis for completed-turn speed.
+
+![Conversation details with synthetic data](docs/images/conversation-details.jpg)
+
 ## Requirements
 
 - Python **3.10 or later** and a modern browser.

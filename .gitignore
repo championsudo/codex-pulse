@@ -48,6 +48,10 @@ logs/
 screenshots/
 *.png
 *.jpg
+!docs/images/overview.jpg
+!docs/images/usage-trends.jpg
+!docs/images/live-speed.jpg
+!docs/images/conversation-details.jpg
 *.jpeg
 *.webp
 *.gif
