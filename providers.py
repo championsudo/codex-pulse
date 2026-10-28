@@ -7,7 +7,7 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-PROVIDERS = {"codex", "claude", "opencode"}
+PROVIDERS = {"codex", "claude", "opencode", "zcode"}
 
 def timestamp(value):
     try:
@@ -253,5 +253,58 @@ def parse_opencode(path):
         return [], list(dict.fromkeys(warnings)) or ["OpenCode 数据库结构不受支持，已跳过。"]
     except (sqlite3.Error, ValueError, TypeError, OSError, KeyError):
         return list(records.values()), list(dict.fromkeys(warnings + ["OpenCode 数据库无法读取或结构不受支持，其他代理统计不受影响。"]))
+    finally:
+        if conn: conn.close()
+
+
+def parse_zcode(path):
+    """Read only the canonical request ledger and completed turn boundaries."""
+    records = {}; warnings = []; conn = None
+    try:
+        conn = sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=0.2)
+        required = {
+            "session": {"id", "parent_id"},
+            "model_usage": {"id", "session_id", "turn_id", "model_id", "status", "completed_at", "input_tokens", "output_tokens", "reasoning_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "provider_total_tokens", "computed_total_tokens"},
+            "turn_usage": {"session_id", "turn_id", "status", "started_at", "completed_at", "model_request_count", "output_tokens"},
+        }
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if any(table not in tables or not fields <= {r[1] for r in conn.execute(f'PRAGMA table_info("{table}")')} for table, fields in required.items()):
+            return [], ["Z Code 数据库结构不受支持，已跳过该来源。"]
+        for sid, parent in conn.execute("SELECT id,parent_id FROM session"):
+            if isinstance(sid, str) and (parent is None or isinstance(parent, str)):
+                records[sid] = record("zcode", sid, parent)
+        counts = {}; outputs = {}; times = {}; incomplete = set()
+        query = "SELECT id,session_id,turn_id,model_id,status,completed_at,input_tokens,output_tokens,reasoning_tokens,cache_creation_input_tokens,cache_read_input_tokens,provider_total_tokens,computed_total_tokens FROM model_usage"
+        for rid, sid, tid, model, status, finished, inp, out, reasoning, creation, cached, provider_total, computed_total in conn.execute(query):
+            if sid not in records or not isinstance(rid, str) or (tid is not None and not isinstance(tid, str)): continue
+            key = (sid, tid)
+            values = (inp, out, reasoning, creation, cached)
+            ts = timestamp(finished)
+            if not all(finite_token(v) for v in values) or ts is None or status not in ("completed", "error", "cancelled"):
+                if tid is not None: incomplete.add(key)
+                if any(number(v) for v in values): warnings.append("部分 Z Code 用量缺少有效字段或完成时间，已跳过。")
+                continue
+            inp, out, reasoning, creation, cached = map(number, values)
+            cache = creation + cached
+            total = provider_total if provider_total is not None else computed_total
+            if inp <= 0: inp = cache
+            elif cache > 0 and finite_token(total) and total > 0 and abs(total - (inp + cache + out)) < abs(total - (inp + out)): inp += cache
+            if inp + out:
+                turn_id = tid if tid is not None else "request:" + rid
+                model = model if isinstance(model, str) else "unknown"
+                records[sid]["events"].append(event("zcode", sid, rid, ts, model, turn_id, inp, out, cached, reasoning))
+            if tid is not None:
+                counts[key] = counts.get(key, 0) + 1
+                outputs[key] = outputs.get(key, 0) + out
+                times.setdefault(key, []).append(ts)
+        for sid, tid, status, started, finished, count, output in conn.execute("SELECT session_id,turn_id,status,started_at,completed_at,model_request_count,output_tokens FROM turn_usage"):
+            key = (sid, tid); start = timestamp(started); end = timestamp(finished)
+            if sid not in records or not isinstance(tid, str) or status != "completed" or start is None or end is None or end <= start: continue
+            if key in incomplete or not finite_token(count) or not finite_token(output) or counts.get(key, 0) != count or outputs.get(key, 0) != output or any(ts < start or ts > end for ts in times.get(key, [])): continue
+            live = start_turn(records[sid], tid, start); end_turn(records[sid], live, end)
+        for result in records.values(): result["live_turns"] = []
+        return list(records.values()), list(dict.fromkeys(warnings))
+    except (sqlite3.Error, ValueError, TypeError, OSError, KeyError):
+        return [], ["Z Code 数据库无法读取或结构不受支持，其他代理统计不受影响。"]
     finally:
         if conn: conn.close()

@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from providers import PROVIDERS, identity, parse_claude, parse_opencode, paseo_links
+from providers import PROVIDERS, identity, parse_claude, parse_opencode, parse_zcode, paseo_links
 
 FIELDS = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens")
 SPEED_NOTE = ("平均轮次速度 = 已完成轮次的输出 token 总和 ÷ 轮次耗时之和；合计吞吐 = 同一批轮次的输出 token 总和 ÷ 时间区间并集秒数。"
@@ -250,13 +250,15 @@ def finish(target, turn_limit=100):
 
 
 class UsageIndex:
-    def __init__(self, home, tz="Asia/Shanghai", *, paseo_home=None, claude_home=None, opencode_home=None, opencode_db=None):
+    def __init__(self, home, tz="Asia/Shanghai", *, paseo_home=None, claude_home=None, opencode_home=None, opencode_db=None, zcode_home=None, zcode_db=None):
         self.home = Path(home).expanduser().resolve()
         self.tz = ZoneInfo(tz)
         self.paseo_home = Path(paseo_home or os.environ.get("PASEO_HOME") or Path.home() / ".paseo").expanduser().resolve()
         self.claude_home = Path(claude_home or os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude").expanduser().resolve()
         self.opencode_home = Path(opencode_home or Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local" / "share"))) / "opencode").expanduser().resolve()
         self.opencode_db = Path(opencode_db).expanduser().resolve() if opencode_db else self.opencode_home / "opencode.db"
+        self.zcode_home = Path(zcode_home or Path.home() / ".zcode").expanduser().resolve()
+        self.zcode_db = Path(zcode_db).expanduser().resolve() if zcode_db else self.zcode_home / "cli" / "db" / "db.sqlite"
         self.paseo_associations = {}
         self.cache = {}
         self.lock = threading.Lock()
@@ -290,6 +292,9 @@ class UsageIndex:
         if self.opencode_db.exists():
             records, notices = parse_opencode(self.opencode_db); warnings.extend(notices)
             for i, rec in enumerate(records): self.cache[("opencode", i)] = (None, rec)
+        if self.zcode_db.exists():
+            records, notices = parse_zcode(self.zcode_db); warnings.extend(notices)
+            for i, rec in enumerate(records): self.cache[("zcode", i)] = (None, rec)
         self.paseo_associations, notices = paseo_links(self.paseo_home); warnings.extend(notices)
         for _, rec in self.cache.values():
             m = rec["meta"]; linked = self.paseo_associations.get((m.get("provider", "codex"), m.get("native_session_id", rec["id"])), {})
@@ -726,7 +731,7 @@ class UsageIndex:
                 "range": {"start": str(start_date), "end": str(end_date), "days": days},
                 "filters": {"scope": scope, "scope_label": SCOPES[scope], "model": model, "provider": provider, "origin": origin,
                             "available_models": available_models, "days": days, "start": str(start_date), "end": str(end_date)},
-                "source": {"path": str(self.home), "providers": {"codex": {"files": sum(r["meta"].get("provider", "codex") == "codex" for r in records)}, "claude": {"files": sum(r["meta"].get("provider") == "claude" for r in records)}, "opencode": {"files": sum(r["meta"].get("provider") == "opencode" for r in records)}}, "files": len(records), "sessions": len(meta),
+                "source": {"path": str(self.home), "providers": {"codex": {"files": sum(r["meta"].get("provider", "codex") == "codex" for r in records)}, "claude": {"files": sum(r["meta"].get("provider") == "claude" for r in records)}, "opencode": {"files": sum(r["meta"].get("provider") == "opencode" for r in records)}, "zcode": {"files": sum(r["meta"].get("provider") == "zcode" for r in records)}}, "files": len(records), "sessions": len(meta),
                     "warnings": warnings, "speed_note": SPEED_NOTE,
                     "coverage": {"earliest_date": str(min(coverage_dates)) if coverage_dates else None,
                                  "latest_date": str(max(coverage_dates)) if coverage_dates else None,

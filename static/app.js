@@ -10,7 +10,7 @@ const scopes = {
   agent: { label: '仅子代理', description: '只统计普通子代理 · 按所属主对话归组' },
   review: { label: '仅自动审批', description: '只统计自动审批记录 · 按所属主对话归组' }
 };
-const providerLabels = { all: '全部代理工具', codex: 'Codex', claude: 'Claude Code', opencode: 'OpenCode' };
+const providerLabels = { all: '全部代理工具', codex: 'Codex', claude: 'Claude Code', opencode: 'OpenCode', zcode: 'Z Code' };
 const originLabels = { all: '全部 Paseo 关联', paseo: '已关联 Paseo', other: '未关联 Paseo' };
 const rangeLabels = { '1': '今天', '7': '最近 7 天', '30': '最近 30 天', '90': '最近 90 天', all: '全部时间', custom: '自选日期' };
 const categoryLabels = { main: '主对话', agent: '子代理', review: '自动审批', main_tokens: '主对话', agent_tokens: '子代理', review_tokens: '自动审批' };
@@ -239,7 +239,7 @@ function renderSource(data) {
   text('source-count', `${exact(source.files)} 个日志文件 · ${exact(source.sessions)} 个会话线程（全本机读取范围）`);
   text('source-timezone', data.timezone || '本机时区');
   const warnings = Array.isArray(source.warnings) ? source.warnings : [];
-  text('source-capabilities', 'Codex、Claude Code：具备可靠起止记录时统计轮次速度。OpenCode 1.x：仅用量；2.x：仅闭合成功轮次可测速，未闭合不推断运行状态。');
+  text('source-capabilities', 'Codex、Claude Code：具备可靠起止记录时统计轮次速度。OpenCode 1.x：仅用量；2.x 与 Z Code：仅可靠闭合成功轮次可测速；不推断实时状态。');
   text('source-status', warnings.length ? `${warnings.length} 条读取提示` : '读取正常');
   $('source-warnings').innerHTML = warnings.map((warning) => `<li>${esc(typeof warning === 'string' ? warning : JSON.stringify(warning))}</li>`).join('');
   if (source.speed_note) text('source-speed-note', source.speed_note);
@@ -323,7 +323,7 @@ function renderLive() {
   liveText($('live-uncertain-count'), exact(uncertain.length));
   $('live-uncertain').hidden = !uncertain.length;
   $('live-empty').hidden = Boolean(active.length);
-  liveText($('live-empty'), uncertain.length ? '没有检测到近期更新的运行中对话；可展开下方查看状态待确认的轮次。' : '当前筛选下，没有检测到近期更新且未结束的轮次。OpenCode 存储目前不提供可靠实时状态。');
+  liveText($('live-empty'), uncertain.length ? '没有检测到近期更新的运行中对话；可展开下方查看状态待确认的轮次。' : '当前筛选下，没有检测到近期更新且未结束的轮次。OpenCode 与 Z Code 不推断实时状态。');
   const visibleKeys = new Set();
   for (const [container, list] of [[$('live-threads'), active], [$('live-uncertain-threads'), uncertain]]) {
     let previous = null;

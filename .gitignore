@@ -13,6 +13,7 @@ env/
 .claude/
 opencode/
 .opencode/
+.zcode/
 auth.json
 credentials.json
 .credentials.json

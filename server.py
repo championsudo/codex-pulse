@@ -155,13 +155,15 @@ def main():
     parser.add_argument("--claude-home", default=None, help="Claude 配置目录，默认 CLAUDE_CONFIG_DIR 或 ~/.claude")
     parser.add_argument("--opencode-home", default=None, help="OpenCode 数据目录，默认 XDG_DATA_HOME/opencode 或 ~/.local/share/opencode")
     parser.add_argument("--opencode-db", default=None, help="显式指定只读 OpenCode SQLite 数据库")
+    parser.add_argument("--zcode-home", default=None, help="Z Code 数据目录，默认 ~/.zcode")
+    parser.add_argument("--zcode-db", default=None, help="显式指定只读 Z Code SQLite 数据库")
     parser.add_argument("--timezone", default="Asia/Shanghai")
     parser.add_argument("--open", action="store_true", help="同时打开默认浏览器")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error("端口必须在 1024–65535 之间")
     try:
-        index = UsageIndex(args.codex_home, args.timezone, paseo_home=args.paseo_home, claude_home=args.claude_home, opencode_home=args.opencode_home, opencode_db=args.opencode_db)
+        index = UsageIndex(args.codex_home, args.timezone, paseo_home=args.paseo_home, claude_home=args.claude_home, opencode_home=args.opencode_home, opencode_db=args.opencode_db, zcode_home=args.zcode_home, zcode_db=args.zcode_db)
     except ZoneInfoNotFoundError:
         parser.error("时区不可用。请用运行本程序的 Python 执行：python -m pip install tzdata（或 python -m pip install -r requirements.txt），然后重试；同时确认 --timezone 使用有效的 IANA 时区，例如 Asia/Shanghai。Linux/macOS 也可安装系统时区数据库。")
     except OSError as exc:

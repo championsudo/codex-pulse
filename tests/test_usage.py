@@ -67,7 +67,7 @@ class RolloutTestCase(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="codex-pulse-tests-")
         self.addCleanup(self.temp.cleanup)
         self.home = Path(self.temp.name)
-        self.index = UsageIndex(self.home, tz="Asia/Shanghai", paseo_home=self.home / "paseo", claude_home=self.home / "claude", opencode_home=self.home / "opencode")
+        self.index = UsageIndex(self.home, tz="Asia/Shanghai", paseo_home=self.home / "paseo", claude_home=self.home / "claude", opencode_home=self.home / "opencode", zcode_home=self.home / "zcode")
 
     def write(self, name, rows, folder="sessions"):
         path = self.home / folder / name

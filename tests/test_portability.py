@@ -43,7 +43,7 @@ class PortabilityTests(unittest.TestCase):
                     patch("builtins.print"):
                 server_type.return_value.serve_forever.side_effect = KeyboardInterrupt
                 self.assertEqual(server.main(), 0)
-                index_type.assert_called_once_with(home, "UTC", paseo_home=None, claude_home=None, opencode_home=None, opencode_db=None)
+                index_type.assert_called_once_with(home, "UTC", paseo_home=None, claude_home=None, opencode_home=None, opencode_db=None, zcode_home=None, zcode_db=None)
                 server_type.assert_called_once_with(18765, index_type.return_value)
                 server_type.return_value.server_close.assert_called_once_with()
 
@@ -56,7 +56,7 @@ class PortabilityTests(unittest.TestCase):
                     patch("builtins.print"):
                 server_type.return_value.serve_forever.side_effect = KeyboardInterrupt
                 self.assertEqual(server.main(), 0)
-                index_type.assert_called_once_with(home, "UTC", paseo_home=None, claude_home=None, opencode_home=None, opencode_db=None)
+                index_type.assert_called_once_with(home, "UTC", paseo_home=None, claude_home=None, opencode_home=None, opencode_db=None, zcode_home=None, zcode_db=None)
 
     def test_invalid_port_fails_before_reading_any_home(self):
         with patch.object(sys, "argv", ["server.py", "--port", "80"]), \

@@ -20,7 +20,7 @@ class ProviderTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.codex = self.root/'codex'; self.claude = self.root/'claude'; self.paseo = self.root/'paseo'; self.oc = self.root/'opencode'
-        self.index = UsageIndex(self.codex, 'UTC', paseo_home=self.paseo, claude_home=self.claude, opencode_home=self.oc)
+        self.index = UsageIndex(self.codex, 'UTC', paseo_home=self.paseo, claude_home=self.claude, opencode_home=self.oc, zcode_home=self.root / "zcode")
     def write(self, path, rows):
         path.parent.mkdir(parents=True,exist_ok=True); path.write_text(''.join(json.dumps(r)+'\n' for r in rows)); return path
     def cuser(self, i, dt=0, content=None, **kw):
@@ -71,6 +71,14 @@ class ProviderTests(unittest.TestCase):
         p.write_text(json.dumps({'provider':'codex','persistence':{'provider':'claude','sessionId':'same'}}));self.assertEqual(self.snapshot(origin='paseo')['summary']['thread_count'],0)
         self.link('codex');self.assertEqual(self.snapshot(origin='paseo')['summary']['thread_count'],1)
         p.unlink();self.assertEqual(self.snapshot(origin='paseo')['summary']['thread_count'],0)
+    def test_glm_model_keeps_native_provider(self):
+        assistant = self.cassistant(); assistant["message"]["model"] = "glm-4.7"
+        self.write(self.claude/'projects'/'p'/'same.jsonl',[self.cuser('u'),assistant])
+        p,c=self.db(); tokens=self.octokens()
+        c.execute("INSERT INTO message VALUES(?,?,?,?)", ('m','same',int(T*1000),json.dumps({'role':'assistant','modelID':'glm-4.7','tokens':tokens,'time':{'completed':int((T+10)*1000)}})))
+        c.commit(); c.close()
+        d=self.snapshot(model='glm-4.7'); self.assertEqual({r['provider'] for r in d['threads']},{'claude','opencode'})
+        self.assertEqual(self.snapshot(provider='zcode',model='glm-4.7')['summary']['total_tokens'],0)
     def test_claude_last_snapshot_and_cache_semantics(self):
         rows=[self.cuser('u'), self.cassistant(tokens={'input_tokens':30,'output_tokens':90}), self.cassistant(dt=11,tokens={'input_tokens':10,'output_tokens':20,'cache_creation_input_tokens':4,'cache_creation':{'ephemeral_5m_input_tokens':4},'cache_read_input_tokens':6,'output_tokens_details':{'thinking_tokens':3}})]
         self.write(self.claude/'projects'/'p'/'same.jsonl',rows);s=self.snapshot()['summary']

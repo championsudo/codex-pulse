@@ -2,7 +2,7 @@
 
 [中文](README.md) | [English](README.en.md)
 
-本机 Codex、Claude Code、OpenCode 用量与速度面板，支持 Paseo 会话关联。Local, read-only analytics for agent session logs.
+本机 Codex、Claude Code、OpenCode、Z Code 用量与速度面板，支持 Paseo 会话关联。Local, read-only analytics for agent session logs.
 
 统计每日用量、历史轮次速度、主对话与子代理贡献，以及最近活跃的对话。页面与后端都在当前电脑运行；源码包不包含任何真实对话数据。
 
@@ -31,7 +31,7 @@
 - Python **3.10 或更新版本**，以及现代浏览器。
 - Linux、macOS 或 Windows。启动脚本会优先使用项目内的 `.venv`，再寻找系统 Python；不会自动下载或安装任何依赖。
 - 需要有效的 IANA 时区数据库。Windows 通常需要安装 `tzdata`；Linux/macOS 通常已有系统数据库，也可安装 `requirements.txt`。
-- 当前电脑需有 Codex、Claude Code 或受支持的 OpenCode 本地记录；没有日志时正常显示空面板。
+- 当前电脑需有 Codex、Claude Code、受支持的 OpenCode 或 Z Code 本地记录；没有日志时正常显示空面板。
 
 ## 下载与启动
 
@@ -85,7 +85,7 @@ systemctl --user stop codex-pulse.service
 
 ## 参数与数据源
 
-默认发现同一台电脑上的三个代理数据目录及 Paseo 关联元数据。不需要网页登录，不调用官方账号用量 API，也不连接或接管代理。其他电脑使用时，读取的是那台电脑自己的记录。
+默认发现同一台电脑上的四个代理数据目录及 Paseo 关联元数据。不需要网页登录，不调用官方账号用量 API，也不连接或接管代理。其他电脑使用时，读取的是那台电脑自己的记录。
 
 所有启动脚本均转发参数；例如：
 
@@ -102,24 +102,29 @@ bash start.sh --port 8766 --timezone Asia/Shanghai --codex-home "/path/to/.codex
 - `--paseo-home`：Paseo 数据根目录，优先于 `PASEO_HOME`，否则为 `~/.paseo`；只读取其中 `agents/**/*.json` 的会话关联元数据。
 - `--claude-home`：Claude Code 数据根目录，优先于 `CLAUDE_CONFIG_DIR`，否则为 `~/.claude`；从其 `projects/**/*.jsonl` 读取记录（包括子代理文件）。这里应传 `.claude` 根目录，而不是 `projects` 或某个 JSONL 文件。
 - `--opencode-home`：OpenCode 数据根目录，默认 `$XDG_DATA_HOME/opencode`，未设置 `XDG_DATA_HOME` 时为 `~/.local/share/opencode`；读取其中 `opencode.db`。
+- `--zcode-home`：Z Code 根目录，默认 `~/.zcode`，读取 `cli/db/db.sqlite`。
+- `--zcode-db`：显式指定 Z Code SQLite 数据库，优先于根目录下的默认文件。
 - `--opencode-db`：可显式指定 OpenCode SQLite 数据库文件；优先于 `--opencode-home` 下的默认文件。其他 `--*-home` 参数都传目录。
 - `--timezone`：IANA 时区名，默认 `Asia/Shanghai`。例如 `UTC`、`Europe/London`，决定“今天”和每日统计日界线；使用者可按当地时区修改。
 - `--open`：直接运行 `server.py` 时添加可打开默认浏览器。
 
 ## Paseo 与多代理支持
 
-面板读取代理工具自己的本机日志，再用 Paseo 的 `agents` 元数据中的 `provider` 与 `persistence.sessionId` 关联会话；可用元数据中的 `title` 补充名称。Paseo 自身不提供额外一份 token 用量，关联不会重复累加。面板不读取 Paseo 配置、凭据或对话正文。只覆盖同一台电脑，不支持远程 SSH 上的日志，也不包含三个工具以外的代理。
+面板读取代理工具自己的本机日志，再用 Paseo 的 `agents` 元数据中的 `provider` 与 `persistence.sessionId` 关联会话；可用元数据中的 `title` 补充名称。Paseo 自身不提供额外一份 token 用量，关联不会重复累加。面板不读取 Paseo 配置、凭据或对话正文。只覆盖同一台电脑，不支持远程 SSH 上的日志，也不包含四个工具以外的代理。
 
-“代理工具”（全部 / Codex / Claude Code / OpenCode）和“Paseo 关联”（全部 / 已关联 / 未关联）是两个独立筛选。Paseo 关联按整个会话分类；恢复或接管已存在会话后，历史记录也会归入已关联组，不能据此认定它最初由 Paseo 创建。“未关联”只表示本机未找到对应元数据，不证明从未使用过 Paseo。对话汇总若同时包含已关联和未关联的主线程 / 子线程，会显示“部分关联 Paseo”（CSV 为 `mixed`）；筛选仍按每条线程的实际关联状态计入。今日卡、历史、实时和 CSV 均沿用工具与关联筛选；实时区域仍不受日期范围影响。
+“代理工具”（全部 / Codex / Claude Code / OpenCode / Z Code）和“Paseo 关联”（全部 / 已关联 / 未关联）是两个独立筛选。Paseo 关联按整个会话分类；恢复或接管已存在会话后，历史记录也会归入已关联组，不能据此认定它最初由 Paseo 创建。“未关联”只表示本机未找到对应元数据，不证明从未使用过 Paseo。对话汇总若同时包含已关联和未关联的主线程 / 子线程，会显示“部分关联 Paseo”（CSV 为 `mixed`）；筛选仍按每条线程的实际关联状态计入。今日卡、历史、实时和 CSV 均沿用工具与关联筛选；实时区域仍不受日期范围影响。
 
 | 代理工具 | 用量来源与口径 | 历史速度与实时状态 |
 | --- | --- | --- |
 | Codex | `sessions`、`archived_sessions` JSONL，兼容既有新旧用量格式 | 具备完整轮次起止时间时可计算；最近未结束日志活动可做实时估算 |
 | Claude Code | `projects` JSONL；按 assistant message ID 合并重复快照，保留最后有效用量 | 用户轮次起点到 `end_turn` 的完整记录才测速；工具调用不当作新的人类轮次 |
 | OpenCode 1.x | SQLite `session` / `message` / `part`；支持 1.14.46 起已确认的互斥 token 分桶格式 | 只统计用量；step 完成不等于完整用户轮次完成，不生成假轮次速度或运行状态 |
+| Z Code | SQLite `model_usage` 请求账本；GLM 是模型名称，可以属于不同代理工具 | 完整成功轮次且请求数与输出一致时计速度；不推断实时状态 |
 | OpenCode 2.x | SQLite `session_v2` / `session_message`（常规 assistant 响应；压缩请求未覆盖） | 只有用户起点与 `idle` 且 `outcome=succeeded` 闭合的轮次才计历史速度；未闭合不宣称正在运行 |
 
 Claude Code 的总输入 = 非缓存输入 + cache creation input + cache read input，缓存输入列只列 cache read；cache creation 已归入非缓存输入。输出使用日志的 `output_tokens`，其中 thinking 仅在 `output_tokens_details.thinking_tokens` 明确记录时单列。没有该字段时显示“未单列”，不把未知值当成 0；混合聚合会注明“已记录部分”。
+
+Z Code 的 `model_usage` 是唯一用量账本；`turn_usage` 仅用于轮次边界，不再次累加 token。输入包含缓存；旧记录使用上游基于总量接近程度的启发式判断是否补入缓存，存在不确定性。推理是输出的细分。用量按请求完成时间归属（上游按请求开始时间分桶），轮次速度按完成时间归属。上游写入时清理超过 30 天的用量，无法恢复更早历史；未知结构或损坏数据库会跳过并提示，不影响其他来源。不会推断实时运行状态，也不读取 Z Code 标题、正文、配置或凭据。口径依据固定版本 [schema](https://github.com/zai-org/ZCode/blob/3c5b227649371507ddc4eb46ac5133afe6db1cab/apps/zcode-cli/packages/adapters/src/storage/session-store/schema.baseline.sql) 和 [usage 实现](https://github.com/zai-org/ZCode/blob/3c5b227649371507ddc4eb46ac5133afe6db1cab/apps/zcode-cli/packages/adapters/src/storage/session-store/repositories/usage.ts)；仅以合成数据验证。
 
 OpenCode 当前分桶中，input、cache read、cache write 计入总输入；output + reasoning 计入总输出，缓存输入列只列 cache read。不直接累加可能重叠的 `tokens.total`。1.x 同一响应优先使用 `step-finish` 用量，缺少时才回退至 assistant message，避免双计。更老或未知版本、无法识别的结构会给出读取提示并跳过，其他来源可继续统计。`session.version` 只代表会话创建版本，不能证明升级或降级前后的全部历史口径相同；版本或 token 口径无法确认的历史记录不应当作完整覆盖。OpenCode 1.x assistant message 回退记录按 `data.time.completed` 归属；2.x 当前只统计常规 assistant 响应；completed / failed 压缩请求虽可能带有自身用量，但该结构没有可信响应完成时间，因此不计入，并明确提示统计不完整。轮次中若存在已知但未计量的非零用量，该轮次也不参与速度统计，避免以部分输出除以完整耗时。2.x 响应用量优先按 `data.time.streamed`，其次 `completed` 归属，缺少可信响应完成时间时跳过并提示，不用表行创建时间冒充完成时间。2.x 的用户起点和 idle 轮次边界使用相应消息的创建时间。2.x 的时间边界与 1.x 不混用；各工具日志能力不同，跨工具速度只比较实际入选的完整样本。实现使用合成数据回归验证；未进行真实 OpenCode 会话对照，不能将合成测试描述为该平台的实际运行验证。
 
@@ -186,7 +191,7 @@ OpenCode 当前分桶中，input、cache read、cache write 计入总输入；ou
 
 ### 统计口径
 
-以下新旧 token 记录兼容与自动审批细节主要针对 Codex；Claude Code 和 OpenCode 的差异见上方支持表。
+以下新旧 token 记录兼容与自动审批细节主要针对 Codex；Claude Code、OpenCode 和 Z Code 的差异见上方支持表。
 
 · 新日志使用 token_usage_record.usage 逐响应记录，按 response_id 去重。  
 · 缓存 token 属于输入；推理 token 属于输出；total = input + output。  
@@ -222,7 +227,7 @@ OpenCode 当前分桶中，input、cache read、cache write 计入总输入；ou
 
 本项目只监听 `127.0.0.1`，保留 Host / Origin 校验；页面没有 CDN、远程字体、分析脚本或外部 API。请先阅读 [PRIVACY.md](PRIVACY.md)。标题、线程 ID、数据路径和导出 CSV 仍可能包含本机隐私；不要把日志、凭据、导出文件或截图提交到仓库。
 
-**GitHub 用于存放源码。每台电脑仍需运行本地 Python 后端。GitHub Pages 只能托管静态页面，无法运行本项目后端或读取你电脑上的代理日志。** 请上传这个干净的项目文件夹，不要上传 `.codex`、`.paseo`、`.claude`、OpenCode 数据目录、虚拟环境或运行产生的数据。`.gitignore` 是防误传辅助，提交前仍应检查 `git status` / 暂存内容。
+**GitHub 用于存放源码。每台电脑仍需运行本地 Python 后端。GitHub Pages 只能托管静态页面，无法运行本项目后端或读取你电脑上的代理日志。** 请上传这个干净的项目文件夹，不要上传 `.codex`、`.paseo`、`.claude`、`.zcode`、OpenCode 数据目录、虚拟环境或运行产生的数据。`.gitignore` 是防误传辅助，提交前仍应检查 `git status` / 暂存内容。
 
 本项目采用 [MIT 许可](LICENSE)。
 
@@ -230,8 +235,8 @@ OpenCode 当前分桶中，input、cache read、cache write 计入总输入；ou
 
 - **网页打不开或断连**：检查启动终端是否退出或被关闭、是否有报错，以及浏览器地址和端口。重新运行启动脚本后，可用 `curl http://127.0.0.1:8765/api/health` 检查服务（改过端口时请同步修改地址）；如果连接被拒绝，检查服务是否启动及环境限制。首次读取大量日志可能需要数秒甚至更久。关闭终端或重启电脑后需要重新启动，除非自行配置了用户服务。
 - **端口被占用**：用 `--port 8766` 启动并访问对应地址，不必关闭现有服务。
-- **没有用量或对话**：确认对应 `--codex-home` / `--claude-home` / `--opencode-home`（或 `--opencode-db`）指向当前电脑实际数据位置且可读取。Paseo 关联为空时，检查 `--paseo-home`。云端、其他电脑、已删除或尚未保存的记录不在统计范围内。关闭不需要的日期、统计对象、模型、代理工具或 Paseo 关联筛选。
-- **实时列表为空 / 不更新**：确认启用了“自动刷新全部”，选择适当统计对象、“全部模型”“全部代理工具”和全部关联状态；OpenCode 暂不推断实时状态。页面隐藏时会暂停自动读取。已完成轮次会退出实时列表，最近日志活动也不等于正在生成。
+- **没有用量或对话**：确认对应 `--codex-home` / `--claude-home` / `--opencode-home`（或 `--opencode-db`）/ `--zcode-home`（或 `--zcode-db`）指向当前电脑实际数据位置且可读取。Paseo 关联为空时，检查 `--paseo-home`。云端、其他电脑、已删除或尚未保存的记录不在统计范围内。关闭不需要的日期、统计对象、模型、代理工具或 Paseo 关联筛选。
+- **实时列表为空 / 不更新**：确认启用了“自动刷新全部”，选择适当统计对象、“全部模型”“全部代理工具”和全部关联状态；OpenCode 和 Z Code 暂不推断实时状态。页面隐藏时会暂停自动读取。已完成轮次会退出实时列表，最近日志活动也不等于正在生成。
 - **时区不可用 / `ZoneInfoNotFoundError`**：用实际运行面板的同一 Python 执行 `python -m pip install tzdata` 或 `python -m pip install -r requirements.txt`；虚拟环境对应 `.venv/bin/python`（Windows 为 `.venv\Scripts\python.exe`）。同时确认时区名称有效。程序不会静默改成 UTC。
 - **Python 版本不足 / 找不到 Python**：安装 Python 3.10+，重新打开终端，或使用该版本重新建立项目内的 `.venv`。
 - **Ubuntu / Debian 创建虚拟环境提示缺少 `ensurepip`**：安装与所选 Python 版本匹配的 venv 系统包，例如系统 `python3` 对应 `python3-venv`；特定版本如 Python 3.12 可查发行版仓库是否提供 `python3.12-venv`。也可以选择已具备 venv 支持的 Python，例如 `python3.12 -m venv .venv`。如果 `.venv` 已创建失败，先确认它确实是本项目中可删除的失败环境，再清理并重新创建；随后使用该环境的 Python 安装依赖。
@@ -251,4 +256,4 @@ bash -n start.sh           # Linux / macOS
 
 `.github/workflows/tests.yml` 提供 Linux、macOS、Windows 与 Python 3.10 / 3.13 的测试矩阵，并使用 Node.js 22 检查 JavaScript 语法。Windows/macOS 的运行结果需由对应系统或 CI 确认，不能以 Linux 测试结果代替。
 
-项目结构：`server.py` 为本机 HTTP 服务，`usage.py` 为日志解析与统计，`providers.py` 为 Claude Code / OpenCode 与 Paseo 关联适配，`static/` 为离线前端，`tests/` 为合成回归测试。无构建步骤。
+项目结构：`server.py` 为本机 HTTP 服务，`usage.py` 为日志解析与统计，`providers.py` 为 Claude Code / OpenCode / Z Code 与 Paseo 关联适配，`static/` 为离线前端，`tests/` 为合成回归测试。无构建步骤。
