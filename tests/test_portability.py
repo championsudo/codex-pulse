@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import io
 import os
 from pathlib import Path
@@ -65,6 +66,41 @@ class PortabilityTests(unittest.TestCase):
                 server.main()
         self.assertEqual(raised.exception.code, 2)
         index_type.assert_not_called()
+
+    def test_startup_os_errors_provide_specific_advice(self):
+        cases = [
+            (OSError(errno.EADDRINUSE, "synthetic busy"), 8766, ("端口已被占用", "http://127.0.0.1:8766", "--port 8765")),
+            (OSError(errno.EACCES, "synthetic denied"), 8765, ("沙箱", "权限")),
+            (OSError(errno.EPERM, "synthetic forbidden"), 8765, ("容器", "权限")),
+            (OSError(errno.EIO, "synthetic I/O error"), 8765, ("synthetic I/O error",)),
+            (OSError("synthetic unknown error"), 8765, ("synthetic unknown error",)),
+        ]
+        for failure, port, expected in cases:
+            with self.subTest(errno=failure.errno, port=port):
+                error = io.StringIO()
+                with tempfile.TemporaryDirectory(prefix="empty codex home ") as home, \
+                        patch.object(sys, "argv", ["server.py", "--codex-home", home, "--port", str(port)]), \
+                        patch.object(server, "UsageIndex"), \
+                        patch.object(server, "Server", side_effect=failure), \
+                        contextlib.redirect_stderr(error):
+                    self.assertEqual(server.main(), 1)
+                message = error.getvalue()
+                for phrase in expected:
+                    self.assertIn(phrase, message)
+                if failure.errno != errno.EADDRINUSE:
+                    self.assertNotIn("--port", message)
+
+    def test_data_source_permission_error_is_not_mistaken_for_listen_failure(self):
+        error = io.StringIO()
+        with tempfile.TemporaryDirectory(prefix="empty codex home ") as home, \
+                patch.object(sys, "argv", ["server.py", "--codex-home", home]), \
+                patch.object(server, "UsageIndex", side_effect=OSError(errno.EACCES, "synthetic source error")), \
+                patch.object(server, "Server") as server_type, \
+                contextlib.redirect_stderr(error):
+            self.assertEqual(server.main(), 1)
+        self.assertIn("synthetic source error", error.getvalue())
+        self.assertNotIn("监听", error.getvalue())
+        server_type.assert_not_called()
 
     def test_help_works_when_redirected_output_uses_a_legacy_encoding(self):
         result = subprocess.run([sys.executable, str(ROOT / "server.py"), "--help"],

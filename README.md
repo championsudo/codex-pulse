@@ -57,13 +57,31 @@ py -3 -m venv .venv
 
 上述依赖安装需要联网；启动及读取本机日志不需要联网。若系统 Python 已有可用时区库，Linux/macOS 可以直接运行 `bash start.sh`，不必创建虚拟环境。Windows 也可在已安装 `tzdata` 的 Python 上直接运行 `start.cmd`。虚拟环境不能跨电脑复制，请在每台电脑重新创建。
 
-脚本默认打开浏览器，地址为 **http://127.0.0.1:8765**。保持终端开启，按 **Ctrl+C** 停止。重启后重新读取历史日志，无需迁移数据库。若不想自动打开浏览器，可直接运行后端：
+**安装依赖并不表示服务正在运行。** 每次使用时运行启动脚本，默认打开浏览器 **http://127.0.0.1:8765**；保持启动终端开启，按 **Ctrl+C** 停止。从 IDE、Codex 临时执行会话或自动化工具启动时，服务可能随该会话结束或清理而收到终止信号。退出码 143（128 + SIGTERM）说明进程收到终止信号，不能据此判断信号来源或认定日志解析崩溃。重启服务后会重新读取保留的历史日志，无需迁移数据库。若不想自动打开浏览器，可直接运行后端：
 
 ```sh
 python3 server.py
 # Windows 使用：py -3 server.py
 # 已创建 .venv 时请使用该环境的 Python 解释器。
 ```
+
+### 可选：Linux 用户服务
+
+需要长期使用时，可以手动配置 [systemd 用户服务示例](docs/systemd/codex-pulse.service)。示例假定项目位于 `~/Apps/codex-pulse`，且已按上述步骤在该目录创建 `.venv` 并安装依赖；请根据实际位置修改服务文件中的 `WorkingDirectory` 和 `ExecStart`。示例路径不含空格；若修改为含空格的路径，请按 systemd 单元文件语法正确引用。服务直接运行 Python，不自动打开浏览器，仍只监听 `127.0.0.1`。
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp docs/systemd/codex-pulse.service ~/.config/systemd/user/
+# 按需编辑 ~/.config/systemd/user/codex-pulse.service 中的项目路径
+systemctl --user daemon-reload
+systemctl --user start codex-pulse.service
+systemctl --user status codex-pulse.service
+journalctl --user -u codex-pulse.service -f
+# 结束日志查看后，可停止服务
+systemctl --user stop codex-pulse.service
+```
+
+可选地运行 `systemctl --user enable codex-pulse.service`，让服务在用户管理器启动时自动启动；取消使用 `systemctl --user disable codex-pulse.service`。用户服务通常受登录会话和用户管理器生命周期影响，不能保证注销后或开机登录前继续运行；是否需要额外的系统配置取决于环境。模板的 `Restart=on-failure` 用于失败时重启，手动 `stop` 不会触发重启，也不保证任意 SIGTERM 后恢复。项目不会自动安装或启用该服务。
 
 ## 参数与数据源
 
@@ -210,26 +228,27 @@ OpenCode 当前分桶中，input、cache read、cache write 计入总输入；ou
 
 ## 故障排查
 
-- **网页打不开**：检查启动终端是否仍在运行、是否有报错，以及浏览器地址和端口。关闭终端或重启电脑后需要重新启动；项目不会安装后台服务或开机任务。
+- **网页打不开或断连**：检查启动终端是否退出或被关闭、是否有报错，以及浏览器地址和端口。重新运行启动脚本后，可用 `curl http://127.0.0.1:8765/api/health` 检查服务（改过端口时请同步修改地址）；如果连接被拒绝，检查服务是否启动及环境限制。首次读取大量日志可能需要数秒甚至更久。关闭终端或重启电脑后需要重新启动，除非自行配置了用户服务。
 - **端口被占用**：用 `--port 8766` 启动并访问对应地址，不必关闭现有服务。
 - **没有用量或对话**：确认对应 `--codex-home` / `--claude-home` / `--opencode-home`（或 `--opencode-db`）指向当前电脑实际数据位置且可读取。Paseo 关联为空时，检查 `--paseo-home`。云端、其他电脑、已删除或尚未保存的记录不在统计范围内。关闭不需要的日期、统计对象、模型、代理工具或 Paseo 关联筛选。
 - **实时列表为空 / 不更新**：确认启用了“自动刷新全部”，选择适当统计对象、“全部模型”“全部代理工具”和全部关联状态；OpenCode 暂不推断实时状态。页面隐藏时会暂停自动读取。已完成轮次会退出实时列表，最近日志活动也不等于正在生成。
 - **时区不可用 / `ZoneInfoNotFoundError`**：用实际运行面板的同一 Python 执行 `python -m pip install tzdata` 或 `python -m pip install -r requirements.txt`；虚拟环境对应 `.venv/bin/python`（Windows 为 `.venv\Scripts\python.exe`）。同时确认时区名称有效。程序不会静默改成 UTC。
 - **Python 版本不足 / 找不到 Python**：安装 Python 3.10+，重新打开终端，或使用该版本重新建立项目内的 `.venv`。
+- **Ubuntu / Debian 创建虚拟环境提示缺少 `ensurepip`**：安装与所选 Python 版本匹配的 venv 系统包，例如系统 `python3` 对应 `python3-venv`；特定版本如 Python 3.12 可查发行版仓库是否提供 `python3.12-venv`。也可以选择已具备 venv 支持的 Python，例如 `python3.12 -m venv .venv`。如果 `.venv` 已创建失败，先确认它确实是本项目中可删除的失败环境，再清理并重新创建；随后使用该环境的 Python 安装依赖。
 - **浏览器没有自动打开**：手动访问终端显示的本机地址。
 - **新版本代理日志无法识别**：日志格式可能变化，先在不分享私人日志的情况下描述问题；反馈时脱敏标题、ID、路径及正文。
 
 ## 开发与验证
 
-仅使用合成测试数据，不读取个人代理数据目录：
+仅使用合成测试数据，不读取个人代理数据目录。面板日常运行不依赖 Node.js；可选的 JavaScript 语法检查以 Node.js 22 为项目支持基线，建议使用 22 或更新的受支持版本，参见 [Node.js 版本状态](https://nodejs.org/en/about/previous-releases)。
 
 ```sh
 python3 -m unittest discover -s tests -v
 # Windows：py -3 -m unittest discover -s tests -v
-node --check static/app.js  # 可选：需要 Node.js
+node --check static/app.js  # 可选：Node.js 22 或更新的受支持版本
 bash -n start.sh           # Linux / macOS
 ```
 
-`.github/workflows/tests.yml` 提供 Linux、macOS、Windows 与 Python 3.10 / 3.13 的测试矩阵。Windows/macOS 的运行结果需由对应系统或 CI 确认，不能以 Linux 测试结果代替。
+`.github/workflows/tests.yml` 提供 Linux、macOS、Windows 与 Python 3.10 / 3.13 的测试矩阵，并使用 Node.js 22 检查 JavaScript 语法。Windows/macOS 的运行结果需由对应系统或 CI 确认，不能以 Linux 测试结果代替。
 
 项目结构：`server.py` 为本机 HTTP 服务，`usage.py` 为日志解析与统计，`providers.py` 为 Claude Code / OpenCode 与 Paseo 关联适配，`static/` 为离线前端，`tests/` 为合成回归测试。无构建步骤。

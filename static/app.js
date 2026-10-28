@@ -261,7 +261,7 @@ function renderLiveStatus() {
   $('live-error').hidden = !stale;
   if (stale) {
     const old = live.data ? `保留 ${liveTime(live.data.generated_at)} 的快照（${scopes[live.data.filters?.scope]?.label || '任务用量'} · ${live.data.filters?.model === 'all' ? '全部模型' : live.data.filters?.model || '全部模型'} · ${sourceFilterLabel(live.data.filters)}），以下数值不是当前速度。` : '尚无可显示的实时数据。';
-    liveText($('live-error'), `实时更新失败。${old}请确认本地服务正在运行。（${live.error}）`);
+    liveText($('live-error'), `实时更新失败。${old}请确认本地服务正在运行；检查启动终端是否已退出或关闭，并重新运行启动脚本后点击刷新。（${live.error}）`);
   }
   if (live.data) liveText($('live-updated-at'), `读取于 ${liveTime(live.data.generated_at)}${!state.autoRefresh ? ' · 数值已暂停' : ''}`);
 }
@@ -431,7 +431,7 @@ async function loadData() {
     text('connection-status', '连接暂时中断');
     $('status-dot').classList.add('offline');
     const saved = state.data ? `当前仍展示：${filtersLabel(state.applied, state.data.range)}。导出也使用此数据筛选。` : '尚未成功读取数据。';
-    text('error-banner', `更新失败。${saved}请确认本地服务正在运行，再点击刷新。${error.name === 'AbortError' ? '读取超时，首次载入大量日志可能需要更长时间。' : `（${error.message}）`}`);
+    text('error-banner', `更新失败。${saved}请确认本地服务正在运行；检查启动终端是否已退出或关闭，并重新运行启动脚本后点击刷新。${error.name === 'AbortError' ? '读取超时，首次载入大量日志可能需要更长时间。' : `（${error.message}）`}`);
     $('error-banner').hidden = false;
     if (!state.data) {
       text('active-filters', '尚未加载统计数据');

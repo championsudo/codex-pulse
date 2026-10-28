@@ -55,13 +55,31 @@ py -3 -m venv .venv
 
 Installing dependencies requires internet access; starting the dashboard and reading local logs do not. On Linux/macOS, if system Python already has a usable time zone database, you can run `bash start.sh` without creating a virtual environment. On Windows, you can also run `start.cmd` directly with a Python installation that has `tzdata`. Create a new virtual environment on each computer rather than copying one between computers.
 
-The script opens **http://127.0.0.1:8765** in your browser by default. Keep the terminal open and press **Ctrl+C** to stop. After a restart, the dashboard reads the retained logs again; there is no dashboard database to migrate. To start without opening a browser automatically:
+**Installing dependencies does not mean the service is running.** Run the launch script whenever you need the dashboard. It opens **http://127.0.0.1:8765** by default; keep its terminal open and press **Ctrl+C** to stop. When launched from an IDE, a temporary Codex execution session, or an automation tool, the service may receive a termination signal when that session ends or is cleaned up. Exit code 143 (128 + SIGTERM) indicates a termination signal; it does not identify its source or establish that log parsing crashed. After restarting the service, it reads retained logs again; there is no dashboard database to migrate. To start without opening a browser automatically:
 
 ```sh
 python3 server.py
 # Windows: py -3 server.py
 # If using a .venv, use its Python interpreter instead.
 ```
+
+### Optional: Linux user service
+
+For longer-running use, you can manually configure the [systemd user service example](docs/systemd/codex-pulse.service). It assumes the project is at `~/Apps/codex-pulse` with `.venv` created and dependencies installed as above; edit `WorkingDirectory` and `ExecStart` to match the actual location. The example path has no spaces; if using a path with spaces, quote it according to systemd unit syntax. The service runs Python directly, does not open a browser, and still listens only on `127.0.0.1`.
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp docs/systemd/codex-pulse.service ~/.config/systemd/user/
+# Edit paths in ~/.config/systemd/user/codex-pulse.service if needed
+systemctl --user daemon-reload
+systemctl --user start codex-pulse.service
+systemctl --user status codex-pulse.service
+journalctl --user -u codex-pulse.service -f
+# After leaving the log viewer, stop the service if desired
+systemctl --user stop codex-pulse.service
+```
+
+Optionally run `systemctl --user enable codex-pulse.service` to start it when the user manager starts; undo this with `systemctl --user disable codex-pulse.service`. User services normally depend on the login session and user manager lifecycle, so they are not guaranteed to keep running after logout or before login; additional system configuration depends on the environment. The template's `Restart=on-failure` restarts on failure; a manual `stop` does not trigger a restart, and recovery after every SIGTERM is not guaranteed. The project does not install or enable the service automatically.
 
 ## Options and data sources
 
@@ -164,26 +182,27 @@ This project is licensed under the [MIT License](LICENSE).
 
 ## Troubleshooting
 
-- **The page does not open:** check that the launch terminal is still running, look for errors, and verify the browser address and port. Start it again after closing the terminal or restarting; the project installs no background service or startup task.
+- **The page does not open or loses connection:** check whether the launch terminal has exited or been closed, look for errors, and verify the browser address and port. Run the launch script again and check the service with `curl http://127.0.0.1:8765/api/health` (adjust the address if you changed the port). If the connection is refused, check whether the service started and whether the environment restricts it. The first read of many logs may take several seconds or longer. Restart after closing the terminal or rebooting unless you configured a user service yourself.
 - **Port occupied:** use `--port 8766` and visit the corresponding address.
 - **No usage or conversations:** verify `--codex-home`, `--claude-home`, `--opencode-home` or `--opencode-db` points to readable local data. For missing Paseo associations, check `--paseo-home`. Cloud, other-computer, deleted or unsaved records are outside coverage. Remove restrictive date, scope, model, agent or Paseo filters.
 - **Live list empty or not updating:** enable automatic refresh and select the appropriate scope, all models, all agents and all association states. OpenCode live status is not inferred. Automatic reads pause when the page is hidden; completed turns leave the list, and recent log activity does not prove current generation.
 - **Time zone unavailable / `ZoneInfoNotFoundError`:** use the same Python interpreter that runs the dashboard to run `python -m pip install tzdata` or `python -m pip install -r requirements.txt`. For a virtual environment use `.venv/bin/python` (Windows: `.venv\Scripts\python.exe`). Check that the IANA zone name is valid. The program does not silently switch to UTC.
 - **Python missing or too old:** install Python 3.10+, reopen the terminal, or recreate the project `.venv` using that version.
+- **Ubuntu / Debian virtual environment creation reports missing `ensurepip`:** install the venv system package matching the selected Python, such as `python3-venv` for system `python3`. For a specific version such as Python 3.12, check whether your distribution repository provides `python3.12-venv`. Alternatively, select a Python with venv support, for example `python3.12 -m venv .venv`. If creation already failed, first verify that `.venv` is this project's failed environment and can be deleted, then remove it and recreate it. Install dependencies using that environment's Python.
 - **Browser did not open:** manually visit the local address printed in the terminal.
 - **New agent log format not recognized:** the format may have changed. Describe the issue without sharing private logs; redact titles, IDs, paths and text when reporting it.
 
 ## Development and verification
 
-Tests use synthetic data, not personal agent data directories:
+Tests use synthetic data, not personal agent data directories. Node.js is not needed for normal dashboard use; the optional JavaScript syntax check uses Node.js 22 as the project's supported baseline. Node.js 22 or a newer supported version is recommended; see the [Node.js release status](https://nodejs.org/en/about/previous-releases).
 
 ```sh
 python3 -m unittest discover -s tests -v
 # Windows: py -3 -m unittest discover -s tests -v
-node --check static/app.js  # Optional: requires Node.js
+node --check static/app.js  # Optional: Node.js 22 or a newer supported version
 bash -n start.sh           # Linux / macOS
 ```
 
-`.github/workflows/tests.yml` defines a Linux, macOS and Windows test matrix with Python 3.10 and 3.13. Windows/macOS results must be verified on those systems or in CI; Linux results do not establish them.
+`.github/workflows/tests.yml` defines a Linux, macOS and Windows test matrix with Python 3.10 and 3.13, and uses Node.js 22 for the JavaScript syntax check. Windows/macOS results must be verified on those systems or in CI; Linux results do not establish them.
 
 `server.py` contains the local HTTP service, `usage.py` parses and aggregates logs, `providers.py` handles Claude Code / OpenCode and Paseo association, `static/` contains the offline frontend, and `tests/` contains synthetic regression tests. There is no build step.

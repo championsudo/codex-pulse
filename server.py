@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import errno
 import io
 import json
 import os
@@ -161,11 +162,22 @@ def main():
         parser.error("端口必须在 1024–65535 之间")
     try:
         index = UsageIndex(args.codex_home, args.timezone, paseo_home=args.paseo_home, claude_home=args.claude_home, opencode_home=args.opencode_home, opencode_db=args.opencode_db)
-        server = Server(args.port, index)
     except ZoneInfoNotFoundError:
         parser.error("时区不可用。请用运行本程序的 Python 执行：python -m pip install tzdata（或 python -m pip install -r requirements.txt），然后重试；同时确认 --timezone 使用有效的 IANA 时区，例如 Asia/Shanghai。Linux/macOS 也可安装系统时区数据库。")
     except OSError as exc:
-        print(f"无法启动端口 {args.port}（{exc.strerror}）。可用 --port 8766 更换端口。", file=sys.stderr)
+        print(f"无法初始化数据源（{exc}）。请检查实际错误信息和运行环境。", file=sys.stderr)
+        return 1
+    try:
+        server = Server(args.port, index)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            alternative = 8765 if args.port == 8766 else 8766
+            advice = f"端口已被占用，请尝试打开 http://127.0.0.1:{args.port} 查看已有实例，或使用 --port {alternative} 更换端口。"
+        elif exc.errno in (errno.EACCES, errno.EPERM):
+            advice = "监听可能被沙箱、容器或系统权限限制，请检查运行环境及权限。"
+        else:
+            advice = "请检查实际错误信息和运行环境。"
+        print(f"无法启动服务（{exc}）。{advice}", file=sys.stderr)
         return 1
     url = f"http://127.0.0.1:{args.port}"
     print(f"Codex Pulse 已启动：{url}\n数据源：{index.home}\n时区：{index.tz} · 实时监控每 10 秒 / 历史统计每 15 秒刷新 · Ctrl+C 停止", flush=True)

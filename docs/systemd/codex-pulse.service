@@ -1,0 +1,11 @@
+[Unit]
+Description=Codex Pulse local usage dashboard
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Apps/codex-pulse
+ExecStart=%h/Apps/codex-pulse/.venv/bin/python %h/Apps/codex-pulse/server.py
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
