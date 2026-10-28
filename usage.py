@@ -602,6 +602,20 @@ class UsageIndex:
         def in_range(timestamp):
             return start_date <= datetime.fromtimestamp(timestamp, self.tz).date() <= end_date
         summary = blank(); sessions = {}; daily = {}; models = {}
+        hourly = [{"hour": hour, **usage({}), "request_count": 0} for hour in range(24)]
+        local_now = now.astimezone(self.tz)
+        monday = today - timedelta(days=today.weekday())
+        def local_boundary(value):
+            # Round-trip normalizes local times skipped by a daylight-saving transition.
+            candidate = value.replace(tzinfo=self.tz, fold=0)
+            return datetime.fromtimestamp(candidate.timestamp(), self.tz)
+        current_start = local_boundary(datetime.combine(monday, datetime.min.time()))
+        previous_start = local_boundary(datetime.combine(monday - timedelta(days=7), datetime.min.time()))
+        previous_end = local_boundary(local_now.replace(tzinfo=None) - timedelta(days=7))
+        windows = [(current_start, local_now, blank()), (previous_start, previous_end, blank())]
+        def week_target(timestamp):
+            return next((target for lower, upper, target in windows
+                         if lower.timestamp() <= timestamp <= upper.timestamp()), None)
         def ensure_session(sid, timestamp, model_name):
             info = metadata.get(sid, {}); record = meta.get(sid, {}); session_meta = record.get("meta", {})
             session = sessions.setdefault(sid, {"id": sid, "provider": provider_for(sid), "origin": origin_for(sid), "title": info.get("title") or session_meta.get("title") or session_meta.get("paseo_title") or f"对话 {session_meta.get('native_session_id', sid)[:8]}",
@@ -628,8 +642,15 @@ class UsageIndex:
         today_tokens = sum(event["total_tokens"] for event in matched_events
                            if datetime.fromtimestamp(event["timestamp"], self.tz).date() == today)
         for event in matched_events:
+            week = week_target(event["timestamp"])
+            if week is not None:
+                add(week, event)
             if not in_range(event["timestamp"]):
                 continue
+            hour = hourly[datetime.fromtimestamp(event["timestamp"], self.tz).hour]
+            for field in FIELDS:
+                hour[field] += event[field]
+            hour["request_count"] += 1
             sid = event["thread_id"]; key = (sid, event["turn_id"])
             session = ensure_session(sid, event["timestamp"], event["model"])
             session["models"].add(event["model"])
@@ -647,12 +668,17 @@ class UsageIndex:
                     target["_outside"].add(key)
         for key, completion in completions.items():
             sid, tid = key
-            if not scope_matches(sid) or completion["timestamp"] > now.timestamp() or not in_range(completion["timestamp"]):
+            if not scope_matches(sid) or completion["timestamp"] > now.timestamp():
                 continue
             turn = turns.get(key)
             if not turn or (model != "all" and model not in turn["models"]):
                 continue
             turn_models = turn["models"]
+            week = week_target(completion["timestamp"])
+            if week is not None and (model == "all" or len(turn_models) == 1):
+                add_speed(week, completion, turn["output"])
+            if not in_range(completion["timestamp"]):
+                continue
             visible_models = turn_models if model == "all" else {model}
             session = ensure_session(sid, completion["timestamp"], next(iter(visible_models)))
             session["models"].update(visible_models)
@@ -718,6 +744,21 @@ class UsageIndex:
             finish(model_row)
         summary.update(session_count=len(grouped), thread_count=len(sessions), today_tokens=today_tokens, **breakdown)
         finish(summary)
+        week_rows = []
+        week_fields = ("total_tokens", "output_tokens", "request_count", "speed_output_tokens",
+                       "active_seconds", "speed_samples", "average_turn_tps")
+        for lower, upper, target in windows:
+            finish(target)
+            week_rows.append({"start_at": lower.isoformat(), "end_at": upper.isoformat(),
+                              **{field: target[field] for field in week_fields}})
+        current_week, previous_week = week_rows
+        changes = {}
+        for field in ("total_tokens", "output_tokens", "average_turn_tps"):
+            current_value, previous_value = current_week[field], previous_week[field]
+            changes[field] = (round((current_value - previous_value) / previous_value * 100, 2)
+                              if current_value is not None and previous_value is not None and previous_value > 0 else None)
+        week_over_week = {"basis": "calendar_week_to_date", "date_range_applies": False,
+                          "current": current_week, "previous": previous_week, "change_pct": changes}
         warnings = list(self.scan_warnings)
         if not records:
             warnings.append("未找到本机 Codex 会话日志。可以用 --codex-home 指定日志目录。")
@@ -736,7 +777,7 @@ class UsageIndex:
                     "coverage": {"earliest_date": str(min(coverage_dates)) if coverage_dates else None,
                                  "latest_date": str(max(coverage_dates)) if coverage_dates else None,
                                  "matched_threads": len({event["thread_id"] for event in matched_events}), "scope": scope}},
-                "summary": summary, "daily": list(daily.values()),
+                "summary": summary, "daily": list(daily.values()), "hourly": hourly, "week_over_week": week_over_week,
                 "sessions": sorted(grouped.values(), key=lambda s: s["total_tokens"], reverse=True),
                 "threads": sorted(sessions.values(), key=lambda s: s["total_tokens"], reverse=True),
                 "models": sorted(models.values(), key=lambda m: m["total_tokens"], reverse=True)}

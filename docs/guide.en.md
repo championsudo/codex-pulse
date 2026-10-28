@@ -119,6 +119,8 @@ These metrics come from local logs and cannot establish remaining official plan 
 - Filter by agent tool, Paseo association and model; inspect input, cached input, output, recorded reasoning output and daily trends. The cache input ratio is based on token counts, not request hit counts.
 - Main conversation summaries, search and sorting, source contributions, and recent completed-turn details.
 - Separate average turn speed and combined throughput during active periods, with their calculation basis.
+- Speed trends use the completed turn's local date; days without samples remain empty. The hourly distribution buckets selected-range usage events by the configured local time zone, combining repeated daylight-saving hours.
+- Week-over-week compares local Monday midnight through now with the same period last week. Date-range selection does not affect this comparison; other filters apply. A zero previous value or missing speed sample has no percentage change. Results use retained logs and cannot guarantee complete history.
 - Live estimates for main conversations and subagents read logs every 10 seconds. Historical statistics refresh every 15 seconds. Both can be paused together; pausing only affects dashboard reads, and automatic reads pause when the page is hidden.
 - Export conversations, daily totals or all qualifying completed turns as CSV under the same filters.
 

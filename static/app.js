@@ -23,7 +23,7 @@ const known = (value) => value !== null && value !== undefined && Number.isFinit
 const speed = (value) => known(value) ? Number(value).toFixed(1) : '—';
 const average = (item) => item.average_turn_tps ?? item.output_tps;
 const samples = (item) => Array.isArray(item.speed_samples) ? item.speed_samples.length : n(item.speed_samples);
-const state = { data: null, applied: null, days: '7', scope: 'task', model: 'all', provider: 'all', origin: 'all', start: '', end: '', search: '', sort: 'tokens', numberFormat: 'compact', chartMetric: 'total', modelMetric: 'total', autoRefresh: true, expanded: new Set(), expandedTurns: new Set(), requestId: 0, controller: null, loading: false, draftDates: false };
+const state = { data: null, applied: null, days: '7', scope: 'task', model: 'all', provider: 'all', origin: 'all', start: '', end: '', search: '', sort: 'tokens', numberFormat: 'compact', chartMetric: 'total', speedMetric: 'average_turn_tps', hourMetric: 'total_tokens', modelMetric: 'total', autoRefresh: true, expanded: new Set(), expandedTurns: new Set(), requestId: 0, controller: null, loading: false, draftDates: false };
 const live = { data: null, requestId: 0, controller: null, loading: false, error: '', nodes: new Map() };
 try {
   const saved = JSON.parse(localStorage.getItem('codex-pulse-preferences-v2') || '{}');
@@ -186,6 +186,89 @@ function renderChart(data) {
   });
   $('daily-chart').innerHTML = markup + '</svg>';
 }
+function renderSpeedTrend(data) {
+  const days = data.daily || [], field = state.speedMetric;
+  const label = field === 'combined_tps' ? '合计吞吐' : '平均轮次速度';
+  document.querySelectorAll('[data-speed-metric]').forEach((button) => { const active = button.dataset.speedMetric === field; button.classList.toggle('selected', active); button.setAttribute('aria-pressed', String(active)); });
+  if (!days.some((day) => known(day[field]))) {
+    $('speed-trend-chart').innerHTML = '<div class="chart-placeholder"><span>这段时间没有速度样本</span><small>速度只统计具有完整起止时间的已完成轮次。</small></div>';
+    return;
+  }
+  const width = Math.max(320, $('speed-trend-chart').clientWidth - 30);
+  const height = 225, left = 47, right = 12, top = 15, bottom = 30;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const max = niceMax(Math.max(...days.filter((day) => known(day[field])).map((day) => Number(day[field]))));
+  const slotWidth = plotWidth / days.length;
+  const labelStep = Math.max(1, Math.ceil(days.length / Math.max(2, Math.floor(plotWidth / 65))));
+  let markup = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="speed-chart-title speed-chart-description"><title id="speed-chart-title">每日${label}</title><desc id="speed-chart-description">按完成日期统计，单位 tok/s；没有速度样本的日期显示为空缺。包含思考、工具执行与等待。</desc>`;
+  for (let i = 0; i <= 4; i++) {
+    const y = top + plotHeight * (1 - i / 4);
+    markup += `<line class="chart-gridline" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"/><text class="axis-text" x="${left - 9}" y="${y + 3}" text-anchor="end">${esc(decimal(max * i / 4))}</text>`;
+  }
+  let previous = null, points = '';
+  days.forEach((day, i) => {
+    const x = left + (i + .5) * slotWidth;
+    if (known(day[field])) {
+      const y = top + plotHeight * (1 - Number(day[field]) / max);
+      if (previous) markup += `<line class="speed-trend-line" x1="${previous.x}" y1="${previous.y}" x2="${x}" y2="${y}"/>`;
+      const description = `${day.date}：${label} ${speed(day[field])} tok/s；${amount(samples(day))} 个速度样本`;
+      points += `<circle class="speed-trend-point" cx="${x}" cy="${y}" r="4" tabindex="0" role="img" aria-label="${esc(description)}"><title>${esc(description)}</title></circle>`;
+      previous = { x, y };
+    } else previous = null;
+    if ((i % labelStep === 0 && days.length - 1 - i >= Math.max(1, labelStep * .55)) || i === days.length - 1) markup += `<text class="axis-text" x="${x}" y="${height - 8}" text-anchor="middle">${esc(String(day.date || '').slice(5).replace('-', '/'))}</text>`;
+  });
+  $('speed-trend-chart').innerHTML = markup + points + '</svg>';
+}
+function renderHourly(data) {
+  const rows = data.hourly || [], field = state.hourMetric;
+  const label = field === 'output_tokens' ? '输出' : '总用量';
+  text('hourly-timezone', `当地小时 · ${data.timezone || '本地时区'}`);
+  document.querySelectorAll('[data-hour-metric]').forEach((button) => { const active = button.dataset.hourMetric === field; button.classList.toggle('selected', active); button.setAttribute('aria-pressed', String(active)); });
+  if (!rows.some((row) => n(row[field]) > 0)) {
+    $('hourly-chart').innerHTML = `<div class="chart-placeholder"><span>所选日期内没有${label}记录</span><small>可调整日期或其他筛选。</small></div>`;
+    return;
+  }
+  const width = Math.max(320, $('hourly-chart').clientWidth - 30);
+  const height = 225, left = 47, right = 12, top = 15, bottom = 30;
+  const plotWidth = width - left - right, plotHeight = height - top - bottom;
+  const max = niceMax(Math.max(...rows.map((row) => n(row[field]))));
+  const slotWidth = plotWidth / 24, barWidth = Math.min(26, slotWidth * .65);
+  let markup = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="hour-chart-title hour-chart-description"><title id="hour-chart-title">小时${label}分布</title><desc id="hour-chart-description">所选日期内按当地小时累计，非每小时平均或实时速率。</desc>`;
+  for (let i = 0; i <= 4; i++) {
+    const y = top + plotHeight * (1 - i / 4);
+    markup += `<line class="chart-gridline" x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"/><text class="axis-text" x="${left - 9}" y="${y + 3}" text-anchor="end">${esc(amount(max * i / 4))}</text>`;
+  }
+  rows.forEach((row) => {
+    const x = left + row.hour * slotWidth + (slotWidth - barWidth) / 2;
+    const barHeight = n(row[field]) / max * plotHeight;
+    const description = `${row.hour} 时：总用量 ${exact(row.total_tokens)}，输出 ${exact(row.output_tokens)} tokens，${exact(row.request_count)} 条用量记录`;
+    markup += `<g class="bar-group" tabindex="0" role="img" aria-label="${esc(description)}"><title>${esc(description)}</title><rect x="${x}" y="${top + plotHeight - barHeight}" width="${barWidth}" height="${Math.max(1, barHeight)}" fill="${field === 'output_tokens' ? '#ce8a60' : '#7e907a'}" rx="2"/></g>`;
+    markup += `<text class="axis-text" x="${x + barWidth / 2}" y="${height - 8}" text-anchor="middle">${row.hour}</text>`;
+  });
+  $('hourly-chart').innerHTML = markup + '</svg>';
+}
+function renderWeek(data) {
+  const week = data.week_over_week;
+  if (!week) { $('week-comparison').textContent = '暂无周环比数据'; return; }
+  const current = week.current, previous = week.previous;
+  const range = (period) => `<span title="${esc(period.start_at)} — ${esc(period.end_at)}">${esc(period.start_at.slice(0, 16).replace('T', ' '))} — ${esc(period.end_at.slice(0, 16).replace('T', ' '))}</span>`;
+  const change = (field) => {
+    if (field === 'average_turn_tps' && (!current.speed_samples || !previous.speed_samples)) return '样本不足';
+    if (!known(week.change_pct[field])) return '无可计算基线';
+    const value = Number(week.change_pct[field]);
+    return `${value > 0 ? '+' : ''}${decimal(value)}%`;
+  };
+  const metrics = [['total_tokens', '总用量'], ['output_tokens', '输出用量'], ['average_turn_tps', '平均轮次速度']];
+  let markup = `<div class="week-ranges"><span>本周：${range(current)}</span><span>上周：${range(previous)}</span><span>时区：${esc(data.timezone || '本地时区')}</span></div>`;
+  if (!previous.request_count && !previous.speed_samples) markup += '<p class="week-empty">上周同期未观测到记录</p>';
+  markup += '<div class="week-metrics">';
+  metrics.forEach(([field, label]) => {
+    const isSpeed = field === 'average_turn_tps';
+    const value = (period) => isSpeed ? `${speed(period[field])} tok/s（${amount(period.speed_samples)} 个样本）` : `${amount(period[field])} tokens`;
+    markup += `<div><strong>${label}</strong><span>本周 ${esc(value(current))}</span><span>上周 ${esc(value(previous))}</span><span>较上期 ${esc(change(field))}</span></div>`;
+  });
+  $('week-comparison').innerHTML = markup + '</div>';
+}
 function renderModels(data) {
   const field = state.modelMetric === 'output' ? 'output_tokens' : 'total_tokens';
   const models = [...(data.models || [])].sort((a, b) => n(b[field]) - n(a[field]));
@@ -244,7 +327,7 @@ function renderSource(data) {
   $('source-warnings').innerHTML = warnings.map((warning) => `<li>${esc(typeof warning === 'string' ? warning : JSON.stringify(warning))}</li>`).join('');
   if (source.speed_note) text('source-speed-note', source.speed_note);
 }
-function renderAll() { if (!state.data) return; renderContext(state.data); renderSummary(state.data); renderChart(state.data); renderModels(state.data); renderSessions(); renderSource(state.data); }
+function renderAll() { if (!state.data) return; renderContext(state.data); renderSummary(state.data); renderChart(state.data); renderSpeedTrend(state.data); renderHourly(state.data); renderWeek(state.data); renderModels(state.data); renderSessions(); renderSource(state.data); }
 function liveText(element, value) { const next = String(value ?? ''); if (element.textContent !== next) element.textContent = next; }
 function liveTime(value) {
   if (!value) return '尚无记录';
@@ -437,6 +520,9 @@ async function loadData() {
       text('active-filters', '尚未加载统计数据');
       text('scope-description', '连接恢复后再展示统计范围');
       $('daily-chart').innerHTML = '<div class="chart-placeholder">暂无数据，请恢复本地服务后刷新。</div>';
+      $('speed-trend-chart').innerHTML = '<div class="chart-placeholder">暂无数据，请恢复本地服务后刷新。</div>';
+      $('hourly-chart').innerHTML = '<div class="chart-placeholder">暂无数据，请恢复本地服务后刷新。</div>';
+      text('week-comparison', '暂无数据，请恢复本地服务后刷新。');
       $('sessions-body').innerHTML = '<tr><td colspan="6" class="table-empty">尚未成功读取本地会话日志。</td></tr>';
       text('models-list', '等待连接恢复');
       $('metrics').setAttribute('aria-busy', 'false');
@@ -493,9 +579,11 @@ $('range-select').addEventListener('change', (event) => {
 $('filters-form').addEventListener('submit', (event) => { event.preventDefault(); state.start = $('start-date').value; state.end = $('end-date').value; if (!validDates()) return; state.draftDates = false; savePreferences(); loadData(); });
 ['start-date', 'end-date'].forEach((id) => $(id).addEventListener('input', showDateDraft));
 ['scope', 'model', 'provider', 'origin'].forEach((name) => $(`${name}-select`).addEventListener('change', (event) => { state[name] = event.target.value; savePreferences(); loadLive(); if (!state.draftDates) loadData(); }));
-$('number-format').addEventListener('change', (event) => { state.numberFormat = event.target.value; savePreferences(); if (state.data) { renderSummary(state.data); renderModels(state.data); renderSessions(); } renderLive(); });
+$('number-format').addEventListener('change', (event) => { state.numberFormat = event.target.value; savePreferences(); if (state.data) { renderSummary(state.data); renderSpeedTrend(state.data); renderHourly(state.data); renderWeek(state.data); renderModels(state.data); renderSessions(); } renderLive(); });
 $('model-metric').addEventListener('change', (event) => { state.modelMetric = event.target.value; savePreferences(); if (state.data) renderModels(state.data); });
 document.querySelectorAll('[data-chart-metric]').forEach((button) => button.addEventListener('click', () => { state.chartMetric = button.dataset.chartMetric; savePreferences(); if (state.data) renderChart(state.data); }));
+document.querySelectorAll('[data-speed-metric]').forEach((button) => button.addEventListener('click', () => { state.speedMetric = button.dataset.speedMetric; if (state.data) renderSpeedTrend(state.data); }));
+document.querySelectorAll('[data-hour-metric]').forEach((button) => button.addEventListener('click', () => { state.hourMetric = button.dataset.hourMetric; if (state.data) renderHourly(state.data); }));
 $('refresh-button').addEventListener('click', () => { loadLive(); if (state.draftDates) { state.start = $('start-date').value; state.end = $('end-date').value; } if (validDates()) { state.draftDates = false; savePreferences(); loadData(); } });
 $('auto-refresh').addEventListener('change', (event) => {
   state.autoRefresh = event.target.checked;
@@ -549,7 +637,7 @@ window.addEventListener('scroll', scheduleNavigation, { passive: true });
 window.addEventListener('resize', scheduleNavigation);
 scheduleNavigation();
 let resizeTimer;
-window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.data) renderChart(state.data); }, 120); });
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (state.data) { renderChart(state.data); renderSpeedTrend(state.data); renderHourly(state.data); } }, 120); });
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) cancelLiveRequest();
   else if (state.autoRefresh) { loadLive(); if (!state.loading && !state.draftDates) loadData(); }

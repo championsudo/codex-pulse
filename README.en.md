@@ -4,8 +4,8 @@
 
 A local usage and speed dashboard for **Codex, Claude Code, OpenCode and Z Code**, including GLM and other models recorded in their logs, with Paseo session association. Read-only local data; no API key required.
 
-- **Usage**: daily tokens, input / cache / output, model distribution, and main conversation and subagent contributions.
-- **Speed**: historical completed-turn speeds and live estimates for recently active Codex / Claude Code turns.
+- **Usage**: daily tokens, local-hour distribution, this week versus the same period last week, and model and conversation contributions.
+- **Speed**: daily historical completed-turn trends and live estimates for recently active Codex / Claude Code turns.
 - **Filters and exports**: filter by date, model, agent and Paseo association; export conversations, daily totals or turns as CSV.
 - **Local operation**: Python backend and offline frontend, no telemetry or external API calls at runtime.
 
