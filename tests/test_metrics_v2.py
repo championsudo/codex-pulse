@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import sqlite3
+from contextlib import closing
 import sys
 import threading
 from urllib.error import HTTPError
@@ -287,7 +288,7 @@ class MetricsV2Tests(TurnFixture):
 
     def test_latest_sidebar_title_wins_even_when_index_rows_are_out_of_order(self):
         self.write_turn("main")
-        with sqlite3.connect(self.home / "state_5.sqlite") as conn:
+        with closing(sqlite3.connect(self.home / "state_5.sqlite")) as conn, conn:
             conn.execute("CREATE TABLE threads (id TEXT, title TEXT, first_user_message TEXT)")
             conn.execute("INSERT INTO threads VALUES (?, ?, ?)",
                          ("main", "Original title", "PRIVATE-BODY-SHOULD-NOT-APPEAR"))

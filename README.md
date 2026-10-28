@@ -1,5 +1,7 @@
 # Codex Pulse
 
+[中文](README.md) | [English](README.en.md)
+
 本机 Codex、Claude Code、OpenCode 用量与速度面板，支持 Paseo 会话关联。Local, read-only analytics for agent session logs.
 
 统计每日用量、历史轮次速度、主对话与子代理贡献，以及最近活跃的对话。页面与后端都在当前电脑运行；源码包不包含任何真实对话数据。

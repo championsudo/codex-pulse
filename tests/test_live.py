@@ -6,6 +6,7 @@ import json
 import sqlite3
 import sys
 import threading
+from contextlib import closing
 from datetime import timedelta
 from urllib.error import HTTPError
 from urllib.parse import urlencode
@@ -58,7 +59,7 @@ class LiveFixture(RolloutTestCase):
         return self.write(sid + ".jsonl", [*rows, *extra])
 
     def turn_database(self, statuses):
-        with sqlite3.connect(self.home / "thread_history_1.sqlite") as connection:
+        with closing(sqlite3.connect(self.home / "thread_history_1.sqlite")) as connection, connection:
             connection.execute("CREATE TABLE thread_turns (thread_id TEXT, turn_id TEXT, status TEXT)")
             connection.executemany("INSERT INTO thread_turns VALUES (?, ?, ?)", statuses)
 
