@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#f6f5f0">
+  <title>Codex Pulse · 本机代理使用统计</title>
+  <link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <aside class="sidebar" aria-label="主导航">
+    <a class="brand" href="#overview"><span class="brand-symbol" aria-hidden="true">⌁</span><span>Codex <strong>Pulse</strong></span></a>
+    <p class="workspace-label">本机使用面板</p>
+    <nav><a class="nav-link active" href="#overview"><span aria-hidden="true">▦</span>用量总览</a><a class="nav-link" href="#live-section"><span aria-hidden="true">◉</span>运行中</a><a class="nav-link" href="#speed-section"><span aria-hidden="true">↗</span>速度分析</a><a class="nav-link" href="#conversations"><span aria-hidden="true">▤</span>对话记录</a><a class="nav-link" href="#methodology"><span aria-hidden="true">ⓘ</span>统计口径</a></nav>
+    <div class="sidebar-bottom"><div class="local-badge"><span class="status-dot"></span>仅本机 · 私密运行</div><p>用量看消耗<br>速度看体验<br>口径始终可见</p><span class="sidebar-version">CODEX PULSE / LOCAL</span></div>
+  </aside>
+  <div class="page-shell">
+    <header class="topbar"><span>个人工作空间 <span class="slash">/</span> 使用统计</span><div class="connection"><span class="status-dot" id="status-dot"></span><span id="connection-status">正在连接本机</span><span class="local-mark">LOCAL</span></div></header>
+    <main id="main">
+      <section id="overview" aria-labelledby="page-heading">
+        <div class="page-heading-row"><div><p class="eyebrow">A CLEARER VIEW OF YOUR USAGE</p><h1 id="page-heading">本机代理使用统计<span class="heading-period">.</span></h1><p class="page-subtitle">Codex · Claude Code · OpenCode，每天用量与任务速度。</p></div><div class="refresh-controls"><label class="toggle-label" title="运行中每 10 秒、历史统计每 15 秒刷新；取消后两者均暂停"><input id="auto-refresh" type="checkbox" checked>自动刷新全部</label><button id="refresh-button" class="button secondary" type="button"><span class="refresh-icon" aria-hidden="true">↻</span>刷新</button></div></div>
+        <form id="filters-form" class="filter-panel" aria-label="统计筛选">
+          <label>日期范围<select id="range-select"><option value="1">今天</option><option value="7">最近 7 天</option><option value="30">最近 30 天</option><option value="90">最近 90 天</option><option value="all">全部时间</option><option value="custom">自选日期</option></select></label>
+          <label class="scope-filter">统计对象<select id="scope-select"><option value="task">任务用量（主对话 + 子代理）</option><option value="all">全部记录（含自动审批）</option><option value="main">仅主对话</option><option value="agent">仅子代理</option><option value="review">仅自动审批</option></select></label>
+          <label class="provider-filter">代理工具<select id="provider-select"><option value="all">全部代理工具</option><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="opencode">OpenCode</option></select></label>
+          <label class="origin-filter">Paseo 关联<select id="origin-select"><option value="all">全部关联状态</option><option value="paseo">已关联 Paseo</option><option value="other">未关联 Paseo</option></select></label>
+          <label class="model-filter">模型<select id="model-select"><option value="all">全部模型</option></select></label>
+          <label>数字显示<select id="number-format"><option value="compact">简写</option><option value="exact">精确</option></select></label>
+          <div id="custom-dates" class="custom-dates" hidden><label>开始日期<input id="start-date" type="date" required></label><span aria-hidden="true">—</span><label>结束日期<input id="end-date" type="date" required></label><button class="button secondary" type="submit">应用日期</button></div>
+        </form>
+        <div class="data-context" role="status" aria-live="polite"><span class="context-icon" aria-hidden="true">◉</span><div><strong id="active-filters">正在读取统计数据…</strong><span id="scope-description">统计口径会随数据一起更新</span></div><span id="pending-status" class="pending-status" hidden>正在应用筛选…</span></div>
+        <div id="error-banner" class="error-banner" role="alert" hidden></div>
+        <div class="metric-grid" aria-label="用量概览" aria-busy="true" id="metrics">
+          <article class="metric-card"><h2>今日用量 <span class="subtle-tag">独立于日期范围</span></h2><div class="metric-value"><span id="today-value">—</span><span class="metric-unit">tokens</span></div><p id="today-description">沿用统计对象、模型、代理与关联筛选</p></article>
+          <article class="metric-card"><h2>所选范围总用量</h2><div class="metric-value"><span id="total-value">—</span><span class="metric-unit">tokens</span></div><p id="total-description">输入 + 输出，缓存不重复累加</p></article>
+          <article class="metric-card"><h2>所选范围输出用量</h2><div class="metric-value"><span id="output-total-value">—</span><span class="metric-unit">tokens</span></div><p id="output-description">含已记录的推理输出；未单列不代表 0</p></article>
+          <article class="metric-card"><h2>有记录的主对话</h2><div class="metric-value"><span id="sessions-value">—</span><span class="metric-unit">个</span></div><p id="sessions-description">子代理按所属主对话归组</p></article>
+        </div>
+      </section>
+      <section id="live-section" class="live-section" aria-labelledby="live-heading">
+        <div class="section-heading"><div><h2 id="live-heading">正在运行的对话 <span id="live-count" class="count-badge">—</span></h2><p id="live-filter-note">沿用统计对象、模型、代理与关联 · 不受日期范围影响</p></div><span id="live-status" class="live-monitor-status">正在连接…</span></div>
+        <div class="live-intro"><span class="live-dot" aria-hidden="true"></span><p>每 <strong>10 秒</strong>读取日志。显示每个对话<strong>当前轮次</strong>的速度估算，包含思考、工具和等待；用量会在每次模型响应结束时<strong>批量写入</strong>，不是逐 token 流式测速。</p></div>
+        <p id="live-error" class="live-error" role="alert" hidden></p>
+        <div id="live-threads" class="live-thread-list" aria-busy="true"></div>
+        <div id="live-empty" class="live-empty">正在读取当前轮次…</div>
+        <details id="live-uncertain" class="live-uncertain" hidden><summary>状态待确认 <span id="live-uncertain-count">0</span><span class="uncertain-summary-note">超过 5 分钟未更新，不显示当前速度</span></summary><div id="live-uncertain-threads" class="live-thread-list"></div></details>
+        <div class="live-footnote"><span id="live-state-note">“最近活跃”由未见结束事件且最近 5 分钟内有日志更新推断，不能保证此刻仍在生成。</span><span id="live-updated-at">尚未更新</span></div>
+        <details class="live-method"><summary>如何理解当前速度？</summary><div><p><strong>本轮平均</strong> = 本轮已记录输出 ÷ 从开始至此次读取的耗时。<strong>近 60 秒记录速率</strong> = 窗口内新增的已记录输出 ÷ 窗口时长；刚开始的轮次使用实际经过的时长。</p><p>输出含日志中已记录的推理 token；部分代理不单列推理输出。首次用量写入前显示“等待用量”；窗口速率为 0 表示窗口内没有新用量记录，不代表对话停止。选择单个模型时，混合模型轮次无法拆分耗时，因此不提供本轮平均速度。暂停刷新后，显示的数值也会暂停。</p><ul id="live-warnings"></ul></div></details>
+      </section>
+      <section id="speed-section" class="speed-section" aria-labelledby="speed-heading">
+        <div class="section-heading"><div><h2 id="speed-heading">速度，要分开看</h2><p>所选范围的历史统计 · 每 15 秒刷新 · 包含思考、工具执行与等待</p></div><a href="#methodology" class="text-link">统计方法 ↗</a></div>
+        <div class="speed-grid">
+          <article class="speed-card"><div class="speed-card-top"><span class="metric-index">01</span><h3>平均轮次速度</h3><span class="speed-tag">单轮体验</span></div><div class="speed-number"><span id="average-speed">—</span><span>tok/s</span></div><p class="speed-explanation">平均每轮的有效速度，按耗时加权。并行轮次的耗时分别累计。</p><div class="formula"><span>完成样本的输出 ÷ 累计轮次耗时</span><strong id="average-formula">等待完整时间记录</strong></div></article>
+          <article class="speed-card combined-card"><div class="speed-card-top"><span class="metric-index">02</span><h3>活跃期间合计吞吐</h3><span class="speed-tag">入选轮次合计</span></div><div class="speed-number"><span id="combined-speed">—</span><span>tok/s</span></div><p class="speed-explanation">把入选的已完成轮次合在一起看。重叠时间只计一次，空闲时间不计入。</p><div class="formula"><span>相同完成样本的输出 ÷ 活跃时长（区间并集）</span><strong id="combined-formula">等待完整时间记录</strong></div></article>
+        </div>
+        <div class="speed-example"><span class="example-label">举个例子</span><p>两个对话同时运行，各自 <strong>30 tok/s</strong> → 平均轮次 <strong>30</strong>，合计吞吐 <strong>60 tok/s</strong>。</p></div>
+        <div class="speed-evidence"><div><span>已计入速度</span><strong id="speed-samples">—</strong></div><div><span>缺少完整时间</span><strong id="speed-excluded">—</strong></div><div><span title="累计轮次耗时 ÷ 活跃时长；1× 表示没有重叠">平均并行系数</span><strong id="parallelism-value">—</strong></div><div><span title="已完成轮次中有首 token 时间记录的中位数，不是纯生成耗时">首 token 等待中位数</span><strong id="ttft-value">—</strong></div></div>
+        <p class="speed-coverage" id="speed-coverage">无完整起止时间的轮次不会参与速度计算。OpenCode 旧版存储若缺少可靠轮次时间，仅统计用量。</p>
+        <div class="unavailable-speed"><span>纯模型生成速度</span><strong>暂无可靠数据</strong><p>本机日志无法稳定分离生成、思考和工具等待时间。</p></div>
+      </section>
+      <div class="chart-grid">
+        <section class="panel trend-panel" aria-labelledby="trend-heading"><div class="panel-heading"><div><h2 id="trend-heading">每日用量趋势</h2><p id="trend-range">正在加载数据…</p></div><div class="segmented" role="group" aria-label="每日图表指标"><button data-chart-metric="total" class="selected" type="button" aria-pressed="true">总用量</button><button data-chart-metric="output" type="button" aria-pressed="false">仅输出</button></div></div><div class="chart-legend" id="chart-legend"><span><i class="legend-dot uncached"></i>非缓存输入</span><span><i class="legend-dot cached"></i>缓存输入</span><span><i class="legend-dot output"></i>输出</span></div><div id="daily-chart" class="daily-chart"><div class="chart-placeholder">正在读取本地日志…</div></div><div class="chart-footnote"><span>每日统计遵循当前筛选</span><span>缓存输入包含在输入中</span></div></section>
+        <section class="panel composition-panel" aria-labelledby="composition-heading"><div class="panel-heading"><div><h2 id="composition-heading">用量构成</h2><p>所选范围 · 三部分相加为总用量</p></div></div><div class="composition-total"><span id="composition-total">—</span><small>tokens</small></div><div class="composition-bar" id="composition-bar"><span class="uncached"></span><span class="cached"></span><span class="output"></span></div><dl class="composition-list"><div><dt><i class="legend-dot uncached"></i>非缓存输入</dt><dd id="uncached-value">—</dd></div><div><dt><i class="legend-dot cached"></i>缓存输入</dt><dd id="cached-value">—</dd></div><div><dt><i class="legend-dot output"></i>输出</dt><dd id="output-value">—</dd></div></dl><div class="cache-insight"><span>缓存输入占比</span><strong id="cache-rate">—</strong></div></section>
+      </div>
+      <section class="panel models-panel" aria-labelledby="models-heading"><div class="models-heading"><h2 id="models-heading">模型分布</h2><label class="sr-only" for="model-metric">模型分布指标</label><select id="model-metric"><option value="total">按总用量</option><option value="output">按输出用量</option></select></div><div class="models-list" id="models-list">等待模型数据…</div></section>
+      <section class="panel conversations-panel" id="conversations" aria-labelledby="conversations-heading"><div class="table-heading"><div><h2 id="conversations-heading">对话记录 <span class="count-badge" id="conversation-count">0</span></h2><p id="sessions-scope-note">点击名称查看用量来源、速度和已完成轮次。</p></div><div class="export-controls"><label class="sr-only" for="export-type">CSV 导出类型</label><select id="export-type"><option value="sessions">对话汇总</option><option value="daily">每日用量</option><option value="turns">已完成轮次</option></select><a id="export-button" class="button" aria-disabled="true">导出 CSV ↓</a></div></div><div class="table-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><span class="sr-only">搜索对话标题、模型或 ID</span><input id="search-input" type="search" placeholder="搜索对话、模型或 ID…" autocomplete="off"></label><label class="sr-only" for="sort-select">对话排序</label><select id="sort-select"><option value="tokens">总用量从高到低</option><option value="output">输出用量从高到低</option><option value="recent">最近活跃</option><option value="speed">平均轮次速度从高到低</option></select></div><div class="table-scroll"><table><thead><tr><th scope="col" class="conversation-column">对话</th><th scope="col">总 tokens</th><th scope="col">输入 / 输出</th><th scope="col">缓存输入</th><th scope="col">平均轮次速度<small>包含工具与等待</small></th><th scope="col">最近活跃</th></tr></thead><tbody id="sessions-body"><tr><td colspan="6" class="table-empty">正在加载对话记录…</td></tr></tbody></table></div><div class="table-footer"><span id="table-count">等待数据…</span><span>CSV 遵循上方日期、对象、模型、代理与关联筛选；不受搜索和排序影响</span></div></section>
+      <section id="methodology" class="methodology" aria-labelledby="methodology-heading"><div class="section-heading"><h2 id="methodology-heading">这些数字从哪里来</h2><span class="muted">本机日志可解释，套餐账单另计</span></div><div class="method-grid"><article><span class="method-number">01</span><h3>用量与速度，样本不同</h3><p>用量累加范围内的 token 记录；速度只使用具备完整起止时间的已完成轮次，按完成日期归属。未计入速度不代表一定正在运行，也可能是日志缺失。</p></article><article><span class="method-number">02</span><h3>合计吞吐，按活跃时长算</h3><p>合并所有完成样本的时间区间，重叠只计一次，空闲时间排除。平均轮次速度则把每轮耗时相加。两项都不是纯模型解码速度，也不是此刻速度。</p></article><article><span class="method-number">03</span><h3>日志覆盖，决定数据完整性</h3><p>只统计这台电脑保留的 Codex、Claude Code 与 OpenCode 日志。删除、丢失或其他设备上的记录不会补回。输入在每次请求中重新计入；缓存属于输入，已记录的推理属于输出；未单列推理不表示为 0。token 用量不等同生成字数、套餐额度或费用。</p></article></div><details class="source-details"><summary>数据来源与读取状态 <span id="source-status"></span></summary><div class="source-content"><p class="source-association-note">Paseo 关联只读取本机 agents 元数据，按整个会话分类；恢复或接管不代表原始创建来源。仅覆盖本机日志，不连接远程 SSH。</p><dl><div><dt>Codex 根目录</dt><dd id="source-path">—</dd></div><div><dt>各代理记录</dt><dd id="source-providers">—</dd></div><div><dt>速度支持</dt><dd id="source-capabilities">—</dd></div><div><dt>读取范围</dt><dd id="source-count">—</dd></div><div><dt>统计时区</dt><dd id="source-timezone">—</dd></div><div><dt>速度补充</dt><dd id="source-speed-note">完整轮次按完成日期归属。</dd></div></dl><ul id="source-warnings"></ul></div></details></section>
+      <footer class="page-footer"><span><strong>Codex Pulse</strong> <span class="slash">/</span> 本地使用统计</span><span id="updated-at" aria-live="polite">尚未更新</span></footer>
+    </main>
+  </div>
+</body>
+</html>
