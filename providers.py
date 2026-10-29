@@ -4,7 +4,7 @@ import json
 import math
 import re
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 PROVIDERS = {"codex", "claude", "opencode", "zcode"}
@@ -298,6 +298,8 @@ def parse_zcode(path):
                 outputs[key] = outputs.get(key, 0) + out
                 times.setdefault(key, []).append(ts)
         for sid, tid, status, started, finished, count, output in conn.execute("SELECT session_id,turn_id,status,started_at,completed_at,model_request_count,output_tokens FROM turn_usage"):
+            if sid in records and isinstance(tid, str) and status in ("completed", "error", "failed", "cancelled"):
+                records[sid].setdefault("_terminal_turns", []).append((tid, timestamp(finished)))
             key = (sid, tid); start = timestamp(started); end = timestamp(finished)
             if sid not in records or not isinstance(tid, str) or status != "completed" or start is None or end is None or end <= start: continue
             if key in incomplete or not finite_token(count) or not finite_token(output) or counts.get(key, 0) != count or outputs.get(key, 0) != output or any(ts < start or ts > end for ts in times.get(key, [])): continue
@@ -308,3 +310,54 @@ def parse_zcode(path):
         return [], ["Z Code 数据库无法读取或结构不受支持，其他代理统计不受影响。"]
     finally:
         if conn: conn.close()
+
+
+def parse_zcode_live(log_dir, now, cache):
+    """Read recent lifecycle metadata only; log entries never become usage."""
+    today = now.astimezone(timezone.utc).date()
+    turns = {}; present = set()
+    activity = {"turn.phase.started", "turn.phase.completed", "model.request.started",
+                "model.request.completed", "model.request.failed", "tool.call.started",
+                "tool.call.completed", "tool.call.failed", "session.event.persistence.completed"}
+    terminal = {"turn.completed", "turn.failed"}
+    for offset in (-2, -1, 0, 1):
+        path = Path(log_dir) / f"zcode-{today + timedelta(days=offset)}.jsonl"
+        try:
+            stat = path.stat(); version = (stat.st_size, stat.st_mtime_ns, stat.st_ino)
+            present.add(path)
+            if path not in cache or cache[path][0] != version:
+                entries = []
+                with path.open("rb") as stream:
+                    for raw in stream:
+                        if not raw.endswith(b"\n"): continue
+                        try: row = json.loads(raw)
+                        except (ValueError, TypeError): continue
+                        if not isinstance(row, dict): continue
+                        kind = row.get("event"); sid = row.get("sessionId"); tid = row.get("turnId")
+                        ts = timestamp(row.get("timestamp"))
+                        if kind not in activity | terminal | {"turn.started"} or not isinstance(sid, str) or not sid or not isinstance(tid, str) or not tid or ts is None: continue
+                        context = row.get("context")
+                        model = context.get("modelId") if isinstance(context, dict) else None
+                        if kind == "session.event.persistence.completed" and (not isinstance(context, dict) or context.get("sessionEventType") != "model_request"): continue
+                        entries.append((sid, tid, ts, kind, model if isinstance(model, str) and model else None))
+                cache[path] = (version, entries)
+            for sid, tid, ts, kind, model in cache[path][1]:
+                if ts <= now.timestamp(): turns.setdefault((sid, tid), []).append((ts, kind, model))
+        except OSError:
+            cache.pop(path, None)
+    for path in set(cache) - present: del cache[path]
+    records = {}
+    for (sid, tid), entries in turns.items():
+        entries.sort(key=lambda entry: entry[0])
+        starts = [ts for ts, kind, _ in entries if kind == "turn.started"]
+        if not starts: continue
+        start = min(starts)
+        result = records.setdefault(sid, record("zcode", sid))
+        live = start_turn(result, tid, start)
+        for ts, kind, model in entries:
+            if ts < start: continue
+            if kind in terminal: live["terminal_at"].append(ts)
+            elif kind in activity:
+                live["activities"].append(ts)
+                if model: live["model_contexts"].append((ts, model))
+    return list(records.values())

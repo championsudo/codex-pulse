@@ -13,7 +13,7 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from providers import PROVIDERS, identity, parse_claude, parse_opencode, parse_zcode, paseo_links
+from providers import PROVIDERS, identity, parse_claude, parse_opencode, parse_zcode, parse_zcode_live, paseo_links
 
 FIELDS = ("input_tokens", "cached_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens")
 SPEED_NOTE = ("平均轮次速度 = 已完成轮次的输出 token 总和 ÷ 轮次耗时之和；合计吞吐 = 同一批轮次的输出 token 总和 ÷ 时间区间并集秒数。"
@@ -259,8 +259,10 @@ class UsageIndex:
         self.opencode_db = Path(opencode_db).expanduser().resolve() if opencode_db else self.opencode_home / "opencode.db"
         self.zcode_home = Path(zcode_home or Path.home() / ".zcode").expanduser().resolve()
         self.zcode_db = Path(zcode_db).expanduser().resolve() if zcode_db else self.zcode_home / "cli" / "db" / "db.sqlite"
+        self.zcode_log_dir = (self.zcode_db.parent.parent / "log" if self.zcode_db.parent.name == "db" and self.zcode_db.parent.parent.name == "cli" else None) if zcode_db else self.zcode_home / "cli" / "log"
         self.paseo_associations = {}
         self.cache = {}
+        self.zcode_live_cache = {}
         self.lock = threading.Lock()
         self.last_scan = 0
         self.scan_warnings = []
@@ -449,6 +451,18 @@ class UsageIndex:
             now = now or datetime.now(timezone.utc)
             now_ts = now.timestamp()
             records = [value[1] for value in self.cache.values()]
+            zcode_records = {record["id"]: record for record in records if record["meta"].get("provider") == "zcode"}
+            for log_record in parse_zcode_live(self.zcode_log_dir, now, self.zcode_live_cache) if self.zcode_log_dir else []:
+                original = zcode_records.get(log_record["id"])
+                if original is None:
+                    records.append(log_record)
+                else:
+                    merged = {**original, "live_turns": log_record["live_turns"]}
+                    for turn in merged["live_turns"]:
+                        for tid, ended in original.get("_terminal_turns", []):
+                            if turn["turn_id"] == tid:
+                                turn["terminal_at"].append(ended if ended is not None else 0)
+                    records[records.index(original)] = merged
             metadata = self.metadata()
             terminal = self.terminal_turns()
             warnings = list(self.scan_warnings)
@@ -502,6 +516,8 @@ class UsageIndex:
                 # Later contexts win when their timestamps tie with task_started.
                 current_model = max(enumerate(contexts), key=lambda item: (item[1][0], item[0]))[1][1] if contexts else metadata.get(sid, {}).get("model") or "unknown"
                 models = {event["model"] for event in ledger}
+                if provider_for(sid) == "zcode" and contexts and current_model != "unknown":
+                    models.add(current_model)
                 if not models:
                     models.add(current_model)
                 record = meta.get(sid, {})

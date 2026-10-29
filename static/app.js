@@ -334,7 +334,7 @@ function renderSource(data) {
   text('source-count', `${exact(source.files)} 个日志文件 · ${exact(source.sessions)} 个会话线程（全本机读取范围）`);
   text('source-timezone', data.timezone || '本机时区');
   const warnings = Array.isArray(source.warnings) ? source.warnings : [];
-  text('source-capabilities', 'Codex、Claude Code：具备可靠起止记录时统计轮次速度。OpenCode 1.x：仅用量；2.x 与 Z Code：仅可靠闭合成功轮次可测速；不推断实时状态。');
+  text('source-capabilities', 'Codex、Claude Code：具备可靠起止记录时统计轮次速度。OpenCode 1.x：仅用量；2.x 与 Z Code：仅可靠闭合成功轮次可测速。OpenCode 不推断实时状态；Z Code 的实时列表来自近期日志活动。');
   text('source-status', warnings.length ? `${warnings.length} 条读取提示` : '读取正常');
   $('source-warnings').innerHTML = warnings.map((warning) => `<li>${esc(typeof warning === 'string' ? warning : JSON.stringify(warning))}</li>`).join('');
   if (source.speed_note) text('source-speed-note', source.speed_note);
@@ -418,7 +418,7 @@ function renderLive() {
   liveText($('live-uncertain-count'), exact(uncertain.length));
   $('live-uncertain').hidden = !uncertain.length;
   $('live-empty').hidden = Boolean(active.length);
-  liveText($('live-empty'), uncertain.length ? '没有检测到近期更新的运行中对话；可展开下方查看状态待确认的轮次。' : '当前筛选下，没有检测到近期更新且未结束的轮次。OpenCode 与 Z Code 不推断实时状态。');
+  liveText($('live-empty'), uncertain.length ? '没有检测到近期更新的运行中对话；可展开下方查看状态待确认的轮次。' : '当前筛选下，没有检测到近期更新且未结束的轮次。OpenCode 不推断实时状态；Z Code 依据近期日志活动。');
   const visibleKeys = new Set();
   for (const [container, list] of [[$('live-threads'), active], [$('live-uncertain-threads'), uncertain]]) {
     let previous = null;

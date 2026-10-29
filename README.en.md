@@ -66,7 +66,7 @@ The dashboard does not intercept API requests. Missing, unsaved or other-compute
 
 - Discovers local data by default; override locations with options such as `--codex-home`, `--claude-home`, `--opencode-db` and `--zcode-db`. No records produces an empty dashboard.
 - Speed includes thinking, tools and waiting, not pure model decoding. Live estimates read local logs every 10 seconds; history refreshes every 15 seconds. Both can be paused.
-- OpenCode and Z Code live status is not inferred; historical speed depends on the stored format. Z Code prunes usage records older than 30 days. OpenCode / Z Code adapters use synthetic tests and have not been validated against real sessions.
+- OpenCode live status is not inferred. Z Code live entries use recent log activity, which is not a process heartbeat; model or speed may be unavailable. Historical speed depends on the stored format. Z Code prunes usage records older than 30 days. OpenCode / Z Code adapters include synthetic tests.
 
 See the [user guide](docs/guide.en.md) for version support, accounting and speed definitions, troubleshooting and development commands.
 

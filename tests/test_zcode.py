@@ -5,7 +5,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from server import export_csv
 from usage import UsageIndex
@@ -88,6 +88,98 @@ class ZCodeTests(unittest.TestCase):
         rows=[{'type':'session_meta','timestamp':T,'payload':{'id':'s'}},{'type':'token_usage_record','timestamp':T+3,'payload':{'thread_id':'s','response_id':'r','turn_id':'t','model':'glm','usage':{'input_tokens':3,'output_tokens':7}}}]
         log.write_text(''.join(json.dumps(row)+'\n' for row in rows)); self.db.parent.mkdir(parents=True); self.db.write_bytes(b'invalid')
         d=self.snapshot(); self.assertEqual(d['summary']['total_tokens'],10); self.assertEqual(d['threads'][0]['provider'],'codex'); self.assertTrue(d['source']['warnings'])
+    def write_log(self, rows, day=None, tail=b""):
+        day = day or datetime.fromtimestamp(T, timezone.utc).date()
+        path = self.root/'zcode'/'cli'/'log'/f'zcode-{day}.jsonl'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b''.join((json.dumps(row)+'\n').encode() for row in rows) + tail)
+
+    def log(self, kind, offset, sid='s', tid='live', **context):
+        return {'event':kind, 'sessionId':sid, 'turnId':tid,
+                'timestamp':datetime.fromtimestamp(T+offset, timezone.utc).isoformat(),
+                'context':{**context, 'body':SECRET}, 'message':SECRET}
+
+    def live(self, offset=100, **filters):
+        self.index.last_scan=0
+        return self.index.live_snapshot(now=datetime.fromtimestamp(T+offset,timezone.utc),provider='zcode',**filters)
+
+    def test_live_log_without_database_model_and_privacy(self):
+        self.write_log([self.log('turn.started',0), self.log('model.request.started',5),
+                        self.log('session.event.persistence.completed',10,sessionEventType='model_request',modelId='model-a')])
+        data=self.live(); row=data['threads'][0]
+        self.assertEqual((row['status'],row['model'],row['request_count']),('active','model-a',0))
+        self.assertIsNone(row['average_tps']); self.assertIsNone(row['rolling_tps'])
+        self.assertEqual(len(self.live(model='model-a')['threads']),1)
+        self.assertEqual(self.live(model='model-b')['threads'],[])
+        self.assertNotIn(SECRET,json.dumps(data)); self.assertNotIn(SECRET,json.dumps(list(self.index.cache.values())))
+        self.assertEqual(self.snapshot(provider='zcode')['summary']['total_tokens'],0)
+
+    def test_explicit_database_does_not_read_unrelated_home_log(self):
+        self.write_log([self.log('turn.started',0),self.log('tool.call.started',1,modelId='home-model')])
+        other=self.root/'other'; db=other/'cli'/'db'/'db.sqlite'; fixture(db).close()
+        index=UsageIndex(self.root/'codex','UTC',paseo_home=self.root/'paseo',claude_home=self.root/'claude',
+                         opencode_home=self.root/'opencode',zcode_home=self.root/'zcode',zcode_db=db)
+        self.assertEqual(index.live_snapshot(provider='zcode',now=datetime.fromtimestamp(T+100,timezone.utc))['threads'],[])
+        log=other/'cli'/'log'/f'zcode-{datetime.fromtimestamp(T,timezone.utc).date()}.jsonl'; log.parent.mkdir(parents=True)
+        log.write_text(json.dumps(self.log('turn.started',0))+'\n')
+        index.last_scan=0
+        self.assertEqual(len(index.live_snapshot(provider='zcode',now=datetime.fromtimestamp(T+100,timezone.utc))['threads']),1)
+        index=UsageIndex(self.root/'codex','UTC',paseo_home=self.root/'paseo',claude_home=self.root/'claude',
+                         opencode_home=self.root/'opencode',zcode_home=self.root/'zcode',zcode_db=self.root/'custom.sqlite')
+        self.assertEqual(index.live_snapshot(provider='zcode',now=datetime.fromtimestamp(T+100,timezone.utc))['threads'],[])
+
+    def test_live_log_terminal_order_partial_and_no_reopen(self):
+        for ending in ('turn.completed','turn.failed'):
+            with self.subTest(ending=ending):
+                self.write_log([self.log(ending,30),self.log('tool.call.completed',20,modelId='m'),
+                                self.log('turn.started',0),self.log('session.event.persistence.completed',40,sessionEventType='model_request',modelId='title-model')],
+                               tail=json.dumps(self.log('turn.started',50,tid='partial')).encode())
+                self.assertEqual(self.live()['threads'],[])
+        self.write_log([self.log('tool.call.started',10,modelId='m')])
+        self.assertEqual(self.live()['threads'],[])
+
+    def test_live_switch_model_with_existing_ledger(self):
+        c=fixture(self.db); c.execute("UPDATE model_usage SET turn_id='live'"); c.execute("DELETE FROM turn_usage"); c.commit(); c.close()
+        self.write_log([self.log('turn.started',0), self.log('model.request.completed',20,modelId='glm-4.7'),
+                        self.log('model.request.completed',20,modelId='glm-4.7'),
+                        self.log('tool.call.started',40,modelId='model-b')])
+        a=self.live(model='glm-4.7')['threads'][0]; b=self.live(model='model-b')['threads'][0]
+        self.assertEqual((a['output_tokens'],a['request_count']), (30,2))
+        self.assertEqual((b['output_tokens'],b['request_count']), (0,0))
+        self.assertIsNone(b['average_tps']); self.assertIsNone(a['average_tps'])
+        self.assertEqual(sorted(b['models']), ['glm-4.7','model-b'])
+
+    def test_live_cross_day_staleness_and_duplicate(self):
+        day=datetime.fromtimestamp(T,timezone.utc).date()
+        self.write_log([self.log('turn.started',0), self.log('turn.started',0)],day)
+        self.write_log([self.log('tool.call.started',86400,modelId='m')],day+timedelta(days=1))
+        row=self.live(86410)['threads'][0]; self.assertEqual((row['model'],row['status']),('m','active'))
+        self.assertEqual(self.live(86701)['threads'][0]['status'],'uncertain')
+        self.assertEqual(self.live(172801)['threads'],[])
+
+    def test_live_db_terminal_respects_time_and_missing_time_is_conservative(self):
+        c=fixture(self.db)
+        self.write_log([self.log('turn.started',0,tid='t'),
+                        self.log('tool.call.started',5,tid='t',modelId='glm-4.7'),
+                        self.log('turn.completed',30,tid='t')])
+        self.assertEqual(len(self.live(20)['threads']),1)
+        self.assertEqual(self.live(31)['threads'],[])
+        c.execute("UPDATE turn_usage SET completed_at=NULL"); c.commit()
+        self.assertEqual(self.live(20)['threads'],[])
+        c.close()
+
+    def test_live_db_merge_terminal_and_filters_without_historical_changes(self):
+        c=fixture(self.db); c.execute("INSERT INTO session VALUES(?,?,?)", ('child','s',SECRET)); c.commit(); c.close()
+        before=self.snapshot(provider='zcode')
+        self.write_log([self.log('turn.started',40,tid='t'), self.log('tool.call.started',50,tid='t',modelId='glm-4.7'),
+                        self.log('turn.started',40,sid='child'),self.log('tool.call.started',50,sid='child',modelId='model-b')])
+        self.assertEqual(self.snapshot(provider='zcode'),before)
+        data=self.live(scope='agent',model='model-b'); self.assertEqual(len(data['threads']),1)
+        self.assertEqual(data['threads'][0]['category'],'agent')
+        self.assertEqual(self.live(scope='main')['threads'],[])
+        self.assertEqual(self.live(origin='paseo')['threads'],[])
+        self.assertEqual(len(self.live(origin='other')['threads']),1)
+
     def test_bad_database_does_not_break_other_provider(self):
         self.db.parent.mkdir(parents=True); self.db.write_bytes(b'invalid')
         d=self.snapshot(); self.assertTrue(d['source']['warnings']); self.assertEqual(d['summary']['total_tokens'],0)

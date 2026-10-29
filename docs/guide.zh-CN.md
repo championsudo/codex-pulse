@@ -97,12 +97,12 @@ bash start.sh --port 8766 --timezone Asia/Shanghai --codex-home "/path/to/.codex
 | Codex | `sessions`、`archived_sessions` JSONL，兼容既有新旧用量格式 | 具备完整轮次起止时间时可计算；最近未结束日志活动可做实时估算 |
 | Claude Code | `projects` JSONL；按 assistant message ID 合并重复快照，保留最后有效用量 | 用户轮次起点到 `end_turn` 的完整记录才测速；工具调用不当作新的人类轮次 |
 | OpenCode 1.x | SQLite `session` / `message` / `part`；支持 1.14.46 起已确认的互斥 token 分桶格式 | 只统计用量；step 完成不等于完整用户轮次完成，不生成假轮次速度或运行状态 |
-| Z Code | SQLite `model_usage` 请求账本；GLM 是模型名称，可以属于不同代理工具 | 完整成功轮次且请求数与输出一致时计速度；不推断实时状态 |
+| Z Code | SQLite `model_usage` 请求账本；GLM 是模型名称，可以属于不同代理工具 | 完整成功轮次且请求数与输出一致时计速度；实时状态使用近期日志活动 |
 | OpenCode 2.x | SQLite `session_v2` / `session_message`（常规 assistant 响应；压缩请求未覆盖） | 只有用户起点与 `idle` 且 `outcome=succeeded` 闭合的轮次才计历史速度；未闭合不宣称正在运行 |
 
 Claude Code 的总输入 = 非缓存输入 + cache creation input + cache read input，缓存输入列只列 cache read；cache creation 已归入非缓存输入。输出使用日志的 `output_tokens`，其中 thinking 仅在 `output_tokens_details.thinking_tokens` 明确记录时单列。没有该字段时显示“未单列”，不把未知值当成 0；混合聚合会注明“已记录部分”。
 
-Z Code 的 `model_usage` 是唯一用量账本；`turn_usage` 仅用于轮次边界，不再次累加 token。输入包含缓存；旧记录使用上游基于总量接近程度的启发式判断是否补入缓存，存在不确定性。推理是输出的细分。用量按请求完成时间归属（上游按请求开始时间分桶），轮次速度按完成时间归属。上游写入时清理超过 30 天的用量，无法恢复更早历史；未知结构或损坏数据库会跳过并提示，不影响其他来源。不会推断实时运行状态，也不读取 Z Code 标题、正文、配置或凭据。口径依据固定版本 [schema](https://github.com/zai-org/ZCode/blob/3c5b227649371507ddc4eb46ac5133afe6db1cab/apps/zcode-cli/packages/adapters/src/storage/session-store/schema.baseline.sql) 和 [usage 实现](https://github.com/zai-org/ZCode/blob/3c5b227649371507ddc4eb46ac5133afe6db1cab/apps/zcode-cli/packages/adapters/src/storage/session-store/repositories/usage.ts)；仅以合成数据验证。
+Z Code 的 `model_usage` 是唯一用量账本；`turn_usage` 仅用于轮次边界，不再次累加 token。输入包含缓存；旧记录使用上游基于总量接近程度的启发式判断是否补入缓存，存在不确定性。推理是输出的细分。用量按请求完成时间归属（上游按请求开始时间分桶），轮次速度按完成时间归属。上游写入时清理超过 30 天的用量，无法恢复更早历史；未知结构或损坏数据库会跳过并提示，不影响其他来源。实时列表从近期日志读取事件类型、时间、会话和轮次 ID 与模型 ID；显式数据库仅在标准 `cli/db` 布局下读取相邻 `cli/log`，非标准路径不读取日志；缺少模型时显示未知，缺少账本用量时速度不可计算。近期活动不是进程心跳；不读取 Z Code 标题、正文、配置或凭据。口径依据固定版本 [schema](https://github.com/zai-org/ZCode/blob/3c5b227649371507ddc4eb46ac5133afe6db1cab/apps/zcode-cli/packages/adapters/src/storage/session-store/schema.baseline.sql) 和 [usage 实现](https://github.com/zai-org/ZCode/blob/3c5b227649371507ddc4eb46ac5133afe6db1cab/apps/zcode-cli/packages/adapters/src/storage/session-store/repositories/usage.ts)。
 
 OpenCode 当前分桶中，input、cache read、cache write 计入总输入；output + reasoning 计入总输出，缓存输入列只列 cache read。不直接累加可能重叠的 `tokens.total`。1.x 同一响应优先使用 `step-finish` 用量，缺少时才回退至 assistant message，避免双计。更老或未知版本、无法识别的结构会给出读取提示并跳过，其他来源可继续统计。`session.version` 只代表会话创建版本，不能证明升级或降级前后的全部历史口径相同；版本或 token 口径无法确认的历史记录不应当作完整覆盖。OpenCode 1.x assistant message 回退记录按 `data.time.completed` 归属；2.x 当前只统计常规 assistant 响应；completed / failed 压缩请求虽可能带有自身用量，但该结构没有可信响应完成时间，因此不计入，并明确提示统计不完整。轮次中若存在已知但未计量的非零用量，该轮次也不参与速度统计，避免以部分输出除以完整耗时。2.x 响应用量优先按 `data.time.streamed`，其次 `completed` 归属，缺少可信响应完成时间时跳过并提示，不用表行创建时间冒充完成时间。2.x 的用户起点和 idle 轮次边界使用相应消息的创建时间。2.x 的时间边界与 1.x 不混用；各工具日志能力不同，跨工具速度只比较实际入选的完整样本。实现使用合成数据回归验证；未进行真实 OpenCode 会话对照，不能将合成测试描述为该平台的实际运行验证。
 
@@ -216,7 +216,7 @@ OpenCode 当前分桶中，input、cache read、cache write 计入总输入；ou
 - **网页打不开或断连**：检查启动终端是否退出或被关闭、是否有报错，以及浏览器地址和端口。重新运行启动脚本后，可用 `curl http://127.0.0.1:8765/api/health` 检查服务（改过端口时请同步修改地址）；如果连接被拒绝，检查服务是否启动及环境限制。首次读取大量日志可能需要数秒甚至更久。关闭终端或重启电脑后需要重新启动，除非自行配置了用户服务。
 - **端口被占用**：用 `--port 8766` 启动并访问对应地址，不必关闭现有服务。
 - **没有用量或对话**：确认对应 `--codex-home` / `--claude-home` / `--opencode-home`（或 `--opencode-db`）/ `--zcode-home`（或 `--zcode-db`）指向当前电脑实际数据位置且可读取。Paseo 关联为空时，检查 `--paseo-home`。云端、其他电脑、已删除或尚未保存的记录不在统计范围内。关闭不需要的日期、统计对象、模型、代理工具或 Paseo 关联筛选。
-- **实时列表为空 / 不更新**：确认启用了“自动刷新全部”，选择适当统计对象、“全部模型”“全部代理工具”和全部关联状态；OpenCode 和 Z Code 暂不推断实时状态。页面隐藏时会暂停自动读取。已完成轮次会退出实时列表，最近日志活动也不等于正在生成。
+- **实时列表为空 / 不更新**：确认启用了“自动刷新全部”，选择适当统计对象、“全部模型”“全部代理工具”和全部关联状态；OpenCode 暂不推断实时状态，Z Code 依据近期日志活动。页面隐藏时会暂停自动读取。已完成轮次会退出实时列表，最近日志活动也不等于正在生成。
 - **时区不可用 / `ZoneInfoNotFoundError`**：用实际运行面板的同一 Python 执行 `python -m pip install tzdata` 或 `python -m pip install -r requirements.txt`；虚拟环境对应 `.venv/bin/python`（Windows 为 `.venv\Scripts\python.exe`）。同时确认时区名称有效。程序不会静默改成 UTC。
 - **Python 版本不足 / 找不到 Python**：安装 Python 3.10+，重新打开终端，或使用该版本重新建立项目内的 `.venv`。
 - **Ubuntu / Debian 创建虚拟环境提示缺少 `ensurepip`**：安装与所选 Python 版本匹配的 venv 系统包，例如系统 `python3` 对应 `python3-venv`；特定版本如 Python 3.12 可查发行版仓库是否提供 `python3.12-venv`。也可以选择已具备 venv 支持的 Python，例如 `python3.12 -m venv .venv`。如果 `.venv` 已创建失败，先确认它确实是本项目中可删除的失败环境，再清理并重新创建；随后使用该环境的 Python 安装依赖。
