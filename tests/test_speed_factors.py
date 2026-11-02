@@ -26,7 +26,7 @@ class FactorMathTests(unittest.TestCase):
         self.assertEqual((data['concurrency_pool_samples'],data['eligible_samples']),(3,1))
         self.assertEqual([r['samples'] for r in group['concurrency']],[0,1,0,0])
         self.assertEqual((group['concurrency'][1]['median_tps'],group['concurrency'][1]['ttft_median_ms']),(10,80))
-        self.assertEqual([r['samples'] for r in group['context']],[0,1,0,0])
+        self.assertEqual([r['samples'] for r in group['context']],[0,1,0,0,0])
         completions.pop(('outside1','t'))
         self.assertEqual([r['samples'] for r in self.factors(completions,turns)['groups'][0]['concurrency']],[1,0,0,0])
 
@@ -39,7 +39,7 @@ class FactorMathTests(unittest.TestCase):
                 turns[key]={'models':{'x'},'output':10,'context_known':True,'context_peak':(7999,32000,128000)[group]}
         g=self.factors(completions,turns)['groups'][0]
         self.assertEqual([r['samples'] for r in g['concurrency']],[1,0,2,4])
-        self.assertEqual([r['samples'] for r in g['context']],[1,0,2,4])
+        self.assertEqual([r['samples'] for r in g['context']],[1,0,2,4,0])
 
     def test_epoch_millisecond_solo_and_exact_overlap_boundaries(self):
         end=1793628000.123
@@ -55,6 +55,25 @@ class FactorMathTests(unittest.TestCase):
                                               lambda _:'codex',lambda _:'other','all','all','all')
                     expected={1:[1,0,0,0],2:[0,0,2,0],4:[0,0,0,4]}[concurrent]
                     self.assertEqual([row['samples'] for row in f['groups'][0]['concurrency']],expected)
+
+    def test_context_split_boundaries_unknown_and_baseline_comparison(self):
+        completions={}; turns={}
+        peaks=(100,8000,127999,128000,255999,256000,999999)
+        for group, peak in enumerate(peaks):
+            for n in range(5):
+                key=(f's{group}-{n}','t'); start=(group*5+n)*20
+                completions[key]={'interval_start':start,'timestamp':start+10,'seconds':10,'ttft_ms':None}
+                output=100 if peak < 128000 else 200 if peak < 256000 else 300
+                turns[key]={'models':{'x'},'output':output,'context_known':True,'context_peak':peak}
+        key=('unknown','t'); completions[key]={'interval_start':800,'timestamp':810,'seconds':10,'ttft_ms':None}
+        turns[key]={'models':{'x'},'output':10,'context_known':False,'context_peak':256000}
+        data=self.factors(completions,turns); group=data['groups'][0]; bins=group['context']
+        self.assertEqual([row['key'] for row in bins],['0_8k','8_32k','32_128k','128_256k','256k_plus'])
+        self.assertEqual([row['label'] for row in bins][-2:],['128k–<256k','256k及以上'])
+        self.assertEqual([row['samples'] for row in bins],[5,5,5,10,10])
+        self.assertEqual([row['baseline_delta_pct'] for row in bins],[0,0,0,100,200])
+        self.assertEqual((data['eligible_samples'],data['context_unknown_samples'],group['context_known_samples']),(36,1,35))
+        self.assertEqual([row['samples'] for row in group['concurrency']],[36,0,0,0])
 
     def test_bins_comparisons_zero_and_ttft(self):
         completions={}; turns={}

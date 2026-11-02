@@ -118,7 +118,7 @@ class ProviderTests(unittest.TestCase):
         self.write(self.claude/'projects'/'p'/'same.jsonl',rows)
         f=self.snapshot(provider='claude')['speed_factors']; g=f['groups'][0]
         self.assertEqual((f['eligible_samples'],f['context_unknown_samples'],g['context_known_samples']),(2,1,1))
-        self.assertEqual([row['samples'] for row in g['context']],[0,0,1,0])
+        self.assertEqual([row['samples'] for row in g['context']],[0,0,1,0,0])
 
     def test_claude_subagent_parent_and_coverage(self):
         self.write(self.claude/'projects'/'p'/'same.jsonl',[self.cuser('u'),self.cassistant(tokens={'input_tokens':1,'output_tokens':2,'output_tokens_details':{'thinking_tokens':0}})])
