@@ -98,7 +98,7 @@ class ProviderTests(unittest.TestCase):
               self.cassistant('m2',dt=40,tokens={'input_tokens':10000,'output_tokens':20})]
         self.write(self.claude/'projects'/'p'/'same.jsonl',rows)
         f=self.snapshot(provider='claude')['speed_factors']; self.assertEqual((f['eligible_samples'],f['context_unknown_samples']),(2,0))
-        self.assertEqual(f['groups'][0]['context'][1]['samples'],2)
+        self.assertEqual(f['groups'][0]['context'][0]['samples'],2)
         rows=[self.cuser('old'),self.cassistant('m1',stop='tool_use'),self.cassistant('m2',dt=20,tokens={'input_tokens':9000,'output_tokens':20})]
         del rows[1]['message']['usage']
         self.write(self.claude/'projects'/'p'/'same.jsonl',rows)
@@ -118,7 +118,7 @@ class ProviderTests(unittest.TestCase):
         self.write(self.claude/'projects'/'p'/'same.jsonl',rows)
         f=self.snapshot(provider='claude')['speed_factors']; g=f['groups'][0]
         self.assertEqual((f['eligible_samples'],f['context_unknown_samples'],g['context_known_samples']),(2,1,1))
-        self.assertEqual([row['samples'] for row in g['context']],[0,0,1,0,0])
+        self.assertEqual([row['samples'] for row in g['context']],[0,1,0,0])
 
     def test_claude_subagent_parent_and_coverage(self):
         self.write(self.claude/'projects'/'p'/'same.jsonl',[self.cuser('u'),self.cassistant(tokens={'input_tokens':1,'output_tokens':2,'output_tokens_details':{'thinking_tokens':0}})])

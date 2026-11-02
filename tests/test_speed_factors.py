@@ -26,7 +26,7 @@ class FactorMathTests(unittest.TestCase):
         self.assertEqual((data['concurrency_pool_samples'],data['eligible_samples']),(3,1))
         self.assertEqual([r['samples'] for r in group['concurrency']],[0,1,0,0])
         self.assertEqual((group['concurrency'][1]['median_tps'],group['concurrency'][1]['ttft_median_ms']),(10,80))
-        self.assertEqual([r['samples'] for r in group['context']],[0,1,0,0,0])
+        self.assertEqual([r['samples'] for r in group['context']],[1,0,0,0])
         completions.pop(('outside1','t'))
         self.assertEqual([r['samples'] for r in self.factors(completions,turns)['groups'][0]['concurrency']],[1,0,0,0])
 
@@ -39,7 +39,7 @@ class FactorMathTests(unittest.TestCase):
                 turns[key]={'models':{'x'},'output':10,'context_known':True,'context_peak':(7999,32000,128000)[group]}
         g=self.factors(completions,turns)['groups'][0]
         self.assertEqual([r['samples'] for r in g['concurrency']],[1,0,2,4])
-        self.assertEqual([r['samples'] for r in g['context']],[1,0,2,4,0])
+        self.assertEqual([r['samples'] for r in g['context']],[1,2,4,0])
 
     def test_epoch_millisecond_solo_and_exact_overlap_boundaries(self):
         end=1793628000.123
@@ -68,12 +68,33 @@ class FactorMathTests(unittest.TestCase):
         key=('unknown','t'); completions[key]={'interval_start':800,'timestamp':810,'seconds':10,'ttft_ms':None}
         turns[key]={'models':{'x'},'output':10,'context_known':False,'context_peak':256000}
         data=self.factors(completions,turns); group=data['groups'][0]; bins=group['context']
-        self.assertEqual([row['key'] for row in bins],['0_8k','8_32k','32_128k','128_256k','256k_plus'])
+        self.assertEqual([row['key'] for row in bins],['0_32k','32_128k','128_256k','256k_plus'])
         self.assertEqual([row['label'] for row in bins][-2:],['128k–<256k','256k及以上'])
-        self.assertEqual([row['samples'] for row in bins],[5,5,5,10,10])
-        self.assertEqual([row['baseline_delta_pct'] for row in bins],[0,0,0,100,200])
+        self.assertEqual([row['samples'] for row in bins],[10,5,10,10])
+        self.assertEqual([row['baseline_delta_pct'] for row in bins],[0,0,100,200])
         self.assertEqual((data['eligible_samples'],data['context_unknown_samples'],group['context_known_samples']),(36,1,35))
         self.assertEqual([row['samples'] for row in group['concurrency']],[36,0,0,0])
+
+    def test_merged_context_baseline_uses_all_turns_and_half_open_edges(self):
+        completions={}; turns={}
+        # Two formerly separate buckets have medians 1 and 11, but the merged
+        # median is 1 because four of six turns belong to the smaller range.
+        samples=[(0,10),(7999,10),(7999,10),(7999,10),(8000,110),(31999,110)]
+        samples += [(32000,20)]*5 + [(128000,30)]*5 + [(256000,40)]*5
+        for n,(peak,output) in enumerate(samples):
+            key=(f's{n}','t'); start=n*20
+            completions[key]={'interval_start':start,'timestamp':start+10,'seconds':10,'ttft_ms':None}
+            turns[key]={'models':{'x'},'output':output,'context_known':True,'context_peak':peak}
+        key=('unknown','t'); completions[key]={'interval_start':900,'timestamp':910,'seconds':10,'ttft_ms':None}
+        turns[key]={'models':{'x'},'output':10,'context_known':False,'context_peak':0}
+        data=self.factors(completions,turns); group=data['groups'][0]; rows=group['context']
+        self.assertEqual([r['key'] for r in rows],['0_32k','32_128k','128_256k','256k_plus'])
+        self.assertEqual([r['label'] for r in rows],['0–<32k','32k–<128k','128k–<256k','256k及以上'])
+        self.assertEqual([r['samples'] for r in rows],[6,5,5,5])
+        self.assertEqual([r['median_tps'] for r in rows],[1,2,3,4])
+        self.assertEqual([r['baseline_delta_pct'] for r in rows],[0,100,200,300])
+        self.assertEqual((data['eligible_samples'],data['context_unknown_samples'],group['context_known_samples']),(22,1,21))
+        self.assertEqual([r['samples'] for r in group['concurrency']],[22,0,0,0])
 
     def test_bins_comparisons_zero_and_ttft(self):
         completions={}; turns={}
@@ -82,12 +103,12 @@ class FactorMathTests(unittest.TestCase):
             completions[key]={'interval_start':start,'timestamp':start+10,'seconds':10,'ttft_ms':n if n%2==0 else None}
             turns[key]={'models':{'x'},'output':100 if n<5 else 0,'context_known':True,'context_peak':0 if n<5 else 32000}
         data=self.factors(completions,turns); group=data['groups'][0]
-        self.assertEqual((group['context'][0]['samples'],group['context'][2]['samples']),(5,5))
-        self.assertEqual((group['context'][2]['median_tps'],group['context'][2]['baseline_delta_pct']),(0,-100))
+        self.assertEqual((group['context'][0]['samples'],group['context'][1]['samples']),(5,5))
+        self.assertEqual((group['context'][1]['median_tps'],group['context'][1]['baseline_delta_pct']),(0,-100))
         self.assertEqual((group['context'][0]['ttft_samples'],group['context'][0]['ttft_median_ms']),(3,2))
-        self.assertIsNone(group['context'][1]['baseline_delta_pct'])
+        self.assertIsNone(group['context'][2]['baseline_delta_pct'])
         for n in range(5): turns[(f's{n}','t')]['output']=0
-        self.assertIsNone(self.factors(completions,turns)['groups'][0]['context'][2]['baseline_delta_pct'])
+        self.assertIsNone(self.factors(completions,turns)['groups'][0]['context'][1]['baseline_delta_pct'])
 
 
 class FactorIntegrationTests(RolloutTestCase):
@@ -106,7 +127,7 @@ class FactorIntegrationTests(RolloutTestCase):
         snap=self.snapshot(); f=snap['speed_factors']
         self.assertEqual((f['eligible_samples'],f['excluded_mixed_model_samples'],f['excluded_unknown_model_samples'],f['context_unknown_samples']),(2,1,1,1))
         self.assertEqual(f['groups'][0]['context_known_samples'],1)
-        self.assertEqual(f['groups'][0]['context'][1]['samples'],1)
+        self.assertEqual(f['groups'][0]['context'][0]['samples'],1)
 
     def test_zcode_cache_context_requires_exact_unambiguous_total(self):
         from test_zcode import fixture, T
@@ -177,7 +198,7 @@ class FactorIntegrationTests(RolloutTestCase):
             self.write('fork.jsonl',[meta('fork',timestamp='2026-10-22T02:00:20Z',forked_from_id='main'),copy,finished])
             data=self.snapshot(); f=data['speed_factors']; group=f['groups'][0]
             self.assertEqual((data['summary']['input_tokens'],f['eligible_samples'],f['context_unknown_samples']),(9000,1,0))
-            self.assertEqual((group['context_known_samples'],group['context'][1]['samples']),(1,1))
+            self.assertEqual((group['context_known_samples'],group['context'][0]['samples']),(1,1))
         # A distinct zero-token record without input still makes this turn unknown.
         missing=modern('independent-missing',{},sid='main',turn='t',at=at); missing['payload']['model']='model-a'
         self.write('main.jsonl',[meta('main',timestamp='2026-10-22T01:59:00Z'),original,missing,finished])

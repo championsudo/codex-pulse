@@ -272,7 +272,7 @@ def calculate_speed_factors(completions, turns, now_ts, in_range, scope_matches,
         if previous is not None: integral += count * (tick - previous)
         area[point] = integral; count += change; previous = tick
     concurrent_bins = [("solo", "单独（1）"), ("1_2", "大于1、小于2"), ("2_4", "2至小于4"), ("4_plus", "4及以上")]
-    context_bins = [("0_8k", "0–<8k"), ("8_32k", "8k–<32k"), ("32_128k", "32k–<128k"), ("128_256k", "128k–<256k"), ("256k_plus", "256k及以上")]
+    context_bins = [("0_32k", "0–<32k"), ("32_128k", "32k–<128k"), ("128_256k", "128k–<256k"), ("256k_plus", "256k及以上")]
     groups = {}; mixed = unknown = context_unknown = 0
     for key, c in completions.items():
         sid, _ = key
@@ -297,7 +297,7 @@ def calculate_speed_factors(completions, turns, now_ts, in_range, scope_matches,
         group["concurrency"][index].append(sample)
         if turn["context_known"]:
             peak = turn["context_peak"]
-            index = 0 if peak < 8000 else 1 if peak < 32000 else 2 if peak < 128000 else 3 if peak < 256000 else 4
+            index = 0 if peak < 32000 else 1 if peak < 128000 else 2 if peak < 256000 else 3
             group["context"][index].append(sample); group["context_known_samples"] += 1
         else: context_unknown += 1
     def rows(bins, buckets):
