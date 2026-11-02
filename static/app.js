@@ -23,7 +23,7 @@ const known = (value) => value !== null && value !== undefined && Number.isFinit
 const speed = (value) => known(value) ? Number(value).toFixed(1) : '—';
 const average = (item) => item.average_turn_tps ?? item.output_tps;
 const samples = (item) => Array.isArray(item.speed_samples) ? item.speed_samples.length : n(item.speed_samples);
-const state = { data: null, applied: null, days: '7', scope: 'task', model: 'all', provider: 'all', origin: 'all', start: '', end: '', search: '', sort: 'tokens', numberFormat: 'compact', chartMetric: 'total', speedMetric: 'average_turn_tps', speedModel: 'follow', hourMetric: 'total_tokens', modelMetric: 'total', autoRefresh: true, expanded: new Set(), expandedTurns: new Set(), requestId: 0, controller: null, loading: false, draftDates: false };
+const state = { data: null, applied: null, days: '7', scope: 'task', model: 'all', provider: 'all', origin: 'all', start: '', end: '', search: '', sort: 'tokens', numberFormat: 'compact', chartMetric: 'total', speedMetric: 'average_turn_tps', speedModel: 'follow', factorModel: null, hourMetric: 'total_tokens', modelMetric: 'total', autoRefresh: true, expanded: new Set(), expandedTurns: new Set(), requestId: 0, controller: null, loading: false, draftDates: false };
 const live = { data: null, requestId: 0, controller: null, loading: false, error: '', nodes: new Map() };
 try {
   const saved = JSON.parse(localStorage.getItem('codex-pulse-preferences-v2') || '{}');
@@ -231,6 +231,45 @@ function renderSpeedTrend(data) {
   });
   $('speed-trend-chart').innerHTML = markup + points + '</svg>';
 }
+function factorKey(group) { return JSON.stringify([group.provider, group.model]); }
+function renderSpeedFactors(data) {
+  const factors = data.speed_factors;
+  const groups = factors.groups;
+  const previous = state.factorModel;
+  const group = groups.find((item) => factorKey(item) === previous) || groups[0];
+  state.factorModel = group ? factorKey(group) : null;
+  const select = $('factor-model-select');
+  select.disabled = !group;
+  select.innerHTML = group ? groups.map((item) => `<option value="${esc(factorKey(item))}">${esc(providerLabels[item.provider] || item.provider)} · ${esc(item.model)}（${amount(item.samples)} 轮）</option>`).join('') : '<option>暂无可比较模型</option>';
+  if (group) select.value = state.factorModel;
+  const reset = previous && previous !== state.factorModel;
+  text('factor-selection', `${reset ? '原对比模型不在当前筛选范围，已重新选择。 ' : ''}${group ? `当前模型 ${providerLabels[group.provider] || group.provider} · ${group.model}，${amount(group.samples)} 个完成轮次。` : '当前筛选范围没有可比较的单模型完成轮次。'}`);
+  text('factor-coverage', `目标样本 ${amount(factors.eligible_samples)} 轮；排除混合模型 ${amount(factors.excluded_mixed_model_samples)} 轮、未知模型 ${amount(factors.excluded_unknown_model_samples)} 轮。请求输入峰值未知 ${amount(factors.context_unknown_samples)} 轮；${group ? `当前模型已知 ${amount(group.context_known_samples)} / ${amount(group.samples)} 轮。` : ''}并发参考池包含本机所有可靠的已完成区间，不受全局筛选限制，共 ${amount(factors.concurrency_pool_samples)} 轮。`);
+  if (!group) {
+    $('factor-charts').innerHTML = '<p class="factor-empty">没有可展示的样本。</p>';
+    text('factor-observation', '样本不足，暂不能比较速度。');
+    return;
+  }
+  const charts = [
+    { rows: group.concurrency, title: '观测并发', detail: '轮次内同时进行的已完成轮次数（包含自身），按时间加权平均；并非应用窗口、配置或模型请求并发。实时及缺失区间未计入，覆盖可能偏低。' },
+    { rows: group.context, title: '请求输入峰值（上下文规模近似）', detail: '单次请求输入峰值含缓存；不是整轮累计输入或真实上下文窗口占比。未知值不分档；k = 1,000 tokens。' }
+  ];
+  $('factor-charts').innerHTML = charts.map(({ rows, title, detail }) => {
+    const maximum = Math.max(0, ...rows.map((row) => known(row.median_tps) ? Number(row.median_tps) : 0));
+    const items = rows.map((row, index) => {
+      const value = known(row.median_tps) ? `${speed(row.median_tps)} tok/s` : '暂无速度';
+      const delta = index === 0 ? (row.samples >= factors.min_comparison_samples && Number(row.median_tps) > 0 ? '基准' : '基准样本不足或速度为 0') : known(row.baseline_delta_pct) ? `相对首档 ${Number(row.baseline_delta_pct) > 0 ? '+' : ''}${decimal(row.baseline_delta_pct)}%` : '相对首档：样本不足或基准不可用';
+      const width = maximum && known(row.median_tps) ? Math.max(0, Number(row.median_tps)) / maximum * 100 : 0;
+      return `<div class="factor-row"><div class="factor-row-heading"><strong>${esc(row.label)}</strong><span>${value} · ${amount(row.samples)} 轮</span></div><div class="factor-bar" aria-hidden="true"><span style="width:${width}%"></span></div><div class="factor-row-detail"><span>${delta}</span><span>首 token 等待：${ttft(row.ttft_median_ms)}（${amount(row.ttft_samples)} 轮）</span></div></div>`;
+    }).join('');
+    return `<article class="factor-chart"><h3>${title}</h3><p>${detail}</p>${items}</article>`;
+  }).join('');
+  const observations = charts.flatMap(({ rows, title }) => {
+    const row = rows.slice(1).filter((item) => known(item.baseline_delta_pct)).at(-1);
+    return row ? [`${title}「${row.label}」的速度中位数相对首档 ${Number(row.baseline_delta_pct) > 0 ? '+' : ''}${decimal(row.baseline_delta_pct)}%`] : [];
+  });
+  text('factor-observation', observations.length ? `${observations.join('；')}。` : '当前无法与首档比较：样本不足或首档速度不可用，请结合各档样本数查看。');
+}
 function renderHourly(data) {
   const rows = data.hourly || [], field = state.hourMetric;
   const label = field === 'output_tokens' ? '输出' : '总用量';
@@ -339,7 +378,7 @@ function renderSource(data) {
   $('source-warnings').innerHTML = warnings.map((warning) => `<li>${esc(typeof warning === 'string' ? warning : JSON.stringify(warning))}</li>`).join('');
   if (source.speed_note) text('source-speed-note', source.speed_note);
 }
-function renderAll() { if (!state.data) return; renderContext(state.data); renderSummary(state.data); renderChart(state.data); renderSpeedTrend(state.data); renderHourly(state.data); renderWeek(state.data); renderModels(state.data); renderSessions(); renderSource(state.data); }
+function renderAll() { if (!state.data) return; renderContext(state.data); renderSummary(state.data); renderChart(state.data); renderSpeedTrend(state.data); renderSpeedFactors(state.data); renderHourly(state.data); renderWeek(state.data); renderModels(state.data); renderSessions(); renderSource(state.data); }
 function liveText(element, value) { const next = String(value ?? ''); if (element.textContent !== next) element.textContent = next; }
 function liveTime(value) {
   if (!value) return '尚无记录';
@@ -533,6 +572,7 @@ async function loadData() {
       text('scope-description', '连接恢复后再展示统计范围');
       $('daily-chart').innerHTML = '<div class="chart-placeholder">暂无数据，请恢复本地服务后刷新。</div>';
       $('speed-trend-chart').innerHTML = '<div class="chart-placeholder">暂无数据，请恢复本地服务后刷新。</div>';
+      text('factor-selection', '暂无数据，请恢复本地服务后刷新。');
       $('hourly-chart').innerHTML = '<div class="chart-placeholder">暂无数据，请恢复本地服务后刷新。</div>';
       text('week-comparison', '暂无数据，请恢复本地服务后刷新。');
       $('sessions-body').innerHTML = '<tr><td colspan="6" class="table-empty">尚未成功读取本地会话日志。</td></tr>';
@@ -591,9 +631,10 @@ $('range-select').addEventListener('change', (event) => {
 $('filters-form').addEventListener('submit', (event) => { event.preventDefault(); state.start = $('start-date').value; state.end = $('end-date').value; if (!validDates()) return; state.draftDates = false; savePreferences(); loadData(); });
 ['start-date', 'end-date'].forEach((id) => $(id).addEventListener('input', showDateDraft));
 ['scope', 'model', 'provider', 'origin'].forEach((name) => $(`${name}-select`).addEventListener('change', (event) => { state[name] = event.target.value; savePreferences(); loadLive(); if (!state.draftDates) loadData(); }));
-$('number-format').addEventListener('change', (event) => { state.numberFormat = event.target.value; savePreferences(); if (state.data) { renderSummary(state.data); renderSpeedTrend(state.data); renderHourly(state.data); renderWeek(state.data); renderModels(state.data); renderSessions(); } renderLive(); });
+$('number-format').addEventListener('change', (event) => { state.numberFormat = event.target.value; savePreferences(); if (state.data) { renderSummary(state.data); renderSpeedTrend(state.data); renderSpeedFactors(state.data); renderHourly(state.data); renderWeek(state.data); renderModels(state.data); renderSessions(); } renderLive(); });
 $('model-metric').addEventListener('change', (event) => { state.modelMetric = event.target.value; savePreferences(); if (state.data) renderModels(state.data); });
 document.querySelectorAll('[data-chart-metric]').forEach((button) => button.addEventListener('click', () => { state.chartMetric = button.dataset.chartMetric; savePreferences(); if (state.data) renderChart(state.data); }));
+$('factor-model-select').addEventListener('change', (event) => { state.factorModel = event.target.value; if (state.data) renderSpeedFactors(state.data); });
 $('speed-model-select').addEventListener('change', (event) => { state.speedModel = event.target.value; state.speedModelReset = false; if (state.data) renderSpeedTrend(state.data); });
 document.querySelectorAll('[data-speed-metric]').forEach((button) => button.addEventListener('click', () => { state.speedMetric = button.dataset.speedMetric; if (state.data) renderSpeedTrend(state.data); }));
 document.querySelectorAll('[data-hour-metric]').forEach((button) => button.addEventListener('click', () => { state.hourMetric = button.dataset.hourMetric; if (state.data) renderHourly(state.data); }));

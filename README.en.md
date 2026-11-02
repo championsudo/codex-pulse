@@ -50,7 +50,9 @@ Opens **http://127.0.0.1:8765** by default. **Installing dependencies does not k
 
 Install dependencies on initial setup or when they change; for everyday use, just run the launch script. Create a separate virtual environment on each computer. Node.js is only used for optional development checks, not normal operation.
 
-If the port is occupied, use `bash start.sh --port 8766` (Windows: `.\start.cmd --port 8766`). See the [user guide](docs/guide.en.md) for all options, Ubuntu `ensurepip` troubleshooting and an optional systemd user service.
+If the port is occupied, use `bash start.sh --port 8766` (Windows: `.\start.cmd --port 8766`). - Speed factors compare complete turns within each agent and model. Concurrency measures observed overlap; context is approximated by peak per-request input including cache, not a window percentage. Comparisons do not establish causation.
+
+See the [user guide](docs/guide.en.md) for all options, Ubuntu `ensurepip` troubleshooting and an optional systemd user service.
 
 ## Can it monitor API usage?
 

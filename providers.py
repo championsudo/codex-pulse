@@ -89,7 +89,7 @@ def parse_claude(path):
         native = f"{parent}:agent:{agent}"
     else: parent = None
     result = record("claude", native, parent); result["malformed"] = malformed
-    snapshots = {}; live = None; tid = None
+    snapshots = {}; invalid_inputs = {}; live = None; tid = None
     for row in rows:
         ts = timestamp(row.get("timestamp")); message = row.get("message") or {}
         if ts is None or not isinstance(message, dict):
@@ -113,8 +113,11 @@ def parse_claude(path):
             live["activities"].append(ts); live["model_contexts"].append((ts, model_name))
         u = message.get("usage"); mid = message.get("id")
         valid_usage = isinstance(u, dict) and all(finite_token(u.get(k)) for k in ("input_tokens", "output_tokens")) and all(finite_token(u[k]) for k in ("cache_creation_input_tokens", "cache_read_input_tokens") if k in u)
-        if isinstance(u, dict) and not valid_usage: result["malformed"] += 1
+        if not valid_usage:
+            if isinstance(u, dict): result["malformed"] += 1
+            if tid is not None and mid not in snapshots: invalid_inputs.setdefault(mid, (result["id"], tid, ts))
         if valid_usage and isinstance(mid, str) and any(k in u for k in ("input_tokens", "output_tokens")):
+            invalid_inputs.pop(mid, None)
             inp = number(u.get("input_tokens")) + number(u.get("cache_creation_input_tokens")) + number(u.get("cache_read_input_tokens"))
             detail = u.get("output_tokens_details") or {}
             known = isinstance(detail, dict) and finite_token(detail.get("thinking_tokens"))
@@ -125,6 +128,7 @@ def parse_claude(path):
                 inp, u.get("output_tokens"), u.get("cache_read_input_tokens"), detail.get("thinking_tokens") if isinstance(detail, dict) else 0, known)
         if message.get("stop_reason") == "end_turn" and not duplicate_other_turn and valid_usage: end_turn(result, live, ts, update=bool(live and live["terminal_at"]))
     result["events"] = [e for e in snapshots.values() if e["total_tokens"]]
+    result["_context_unknown_turns"] = list(invalid_inputs.values())
     return result
 
 def paseo_links(home):
@@ -287,12 +291,16 @@ def parse_zcode(path):
             inp, out, reasoning, creation, cached = map(number, values)
             cache = creation + cached
             total = provider_total if provider_total is not None else computed_total
+            context_known = not cache or (inp > 0 and finite_token(total) and total > 0 and
+                ((total == inp + out) != (total == inp + cache + out)))
             if inp <= 0: inp = cache
             elif cache > 0 and finite_token(total) and total > 0 and abs(total - (inp + cache + out)) < abs(total - (inp + out)): inp += cache
             if inp + out:
                 turn_id = tid if tid is not None else "request:" + rid
                 model = model if isinstance(model, str) else "unknown"
-                records[sid]["events"].append(event("zcode", sid, rid, ts, model, turn_id, inp, out, cached, reasoning))
+                item = event("zcode", sid, rid, ts, model, turn_id, inp, out, cached, reasoning)
+                item["_context_input_known"] = context_known
+                records[sid]["events"].append(item)
             if tid is not None:
                 counts[key] = counts.get(key, 0) + 1
                 outputs[key] = outputs.get(key, 0) + out

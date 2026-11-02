@@ -90,7 +90,9 @@ def parse_rollout(path):
                     contexts[turn] = model
                     activity(turn, ts, model)
                 elif kind == "token_usage_record" and ts is not None:
-                    p["usage"] = usage(p.get("usage"))
+                    raw_usage = p.get("usage")
+                    p["_context_input_known"] = isinstance(raw_usage, dict) and finite_number(raw_usage.get("input_tokens"), 0)
+                    p["usage"] = usage(raw_usage)
                     entries.append(("modern", ts, p, model, p.get("turn_id") or turn))
                     if not p.get("thread_id") or p["thread_id"] == meta.get("id"):
                         activity(p.get("turn_id") or turn, ts, p.get("model") or model)
@@ -139,7 +141,7 @@ def parse_rollout(path):
     # Modern records are the per-response ledger. Legacy counters in the SAME
     # file may carry a different inherited baseline, so never combine them.
     has_modern = any(entry[0] == "modern" for entry in entries)
-    previous = usage({}); events = []; resets = 0
+    previous = usage({}); events = []; resets = 0; unrecorded_context = []
     created = stamp(meta.get("timestamp"))
     for kind, ts, p, m, t in entries:
         if kind == "modern":
@@ -167,14 +169,17 @@ def parse_rollout(path):
             owner = sid
             key = ("legacy", ts, signature(total), signature(u))
         if not u["total_tokens"]:
+            if kind == "modern" and not p.get("_context_input_known", False):
+                unrecorded_context.append((key, owner, t, ts))
             continue
         events.append({"key": key, "thread_id": owner, "root_id": p.get("session_id") if kind == "modern" else None, "turn_id": t, "timestamp": ts,
-                       "model": p.get("model") or m, "provider": "codex", "reasoning_known": True, **u})
+                       "model": p.get("model") or m, "provider": "codex", "reasoning_known": True,
+                       "_context_input_known": kind == "modern" and p.get("_context_input_known", False), **u})
     meta.update(provider="codex", native_session_id=sid)
     source = meta.get("source")
     return {"id": sid, "meta": meta, "events": events, "completed": completed, "live_turns": list(live_turns.values()),
             "is_subagent": isinstance(source, dict) and "subagent" in source,
-            "malformed": malformed, "resets": resets}
+            "_context_unrecorded_usage": unrecorded_context, "malformed": malformed, "resets": resets}
 
 
 def blank():
@@ -247,6 +252,74 @@ def finish(target, turn_limit=100):
         target["turns_total"] = len(turns)
         target["turns"] = turns if turn_limit is None else turns[:turn_limit]
     return target
+
+
+def calculate_speed_factors(completions, turns, now_ts, in_range, scope_matches, provider_for, origin_for, provider, origin, model):
+    # Integrate the number of observed completed turns over all half-open intervals.
+    edges = defaultdict(int)
+    pool = [c for c in completions.values() if c["timestamp"] <= now_ts]
+    for c in pool:
+        edges[c["interval_start"]] += 1
+        edges[c["timestamp"]] -= 1
+    # Convert the existing float endpoints to exact integer ticks.  This avoids
+    # cancellation in prefix differences and preserves even short overlaps.
+    ratios = {point: float(point).as_integer_ratio() for point in edges}
+    scale = max((denominator for _, denominator in ratios.values()), default=1)
+    ticks = {point: numerator * (scale // denominator) for point, (numerator, denominator) in ratios.items()}
+    area = {}; count = 0; integral = 0; previous = None
+    for point, change in sorted(edges.items()):
+        tick = ticks[point]
+        if previous is not None: integral += count * (tick - previous)
+        area[point] = integral; count += change; previous = tick
+    concurrent_bins = [("solo", "单独（1）"), ("1_2", "大于1、小于2"), ("2_4", "2至小于4"), ("4_plus", "4及以上")]
+    context_bins = [("0_8k", "0–<8k"), ("8_32k", "8k–<32k"), ("32_128k", "32k–<128k"), ("128k_plus", "128k及以上")]
+    groups = {}; mixed = unknown = context_unknown = 0
+    for key, c in completions.items():
+        sid, _ = key
+        if c["timestamp"] > now_ts or not in_range(c["timestamp"]) or not scope_matches(sid): continue
+        if provider != "all" and provider_for(sid) != provider: continue
+        if origin != "all" and origin_for(sid) != origin: continue
+        turn = turns.get(key)
+        if not turn or (model != "all" and model not in turn["models"]): continue
+        if len(turn["models"]) != 1:
+            mixed += 1; continue
+        name = next(iter(turn["models"]))
+        if not name or name == "unknown":
+            unknown += 1; continue
+        group = groups.setdefault((provider_for(sid), name), {"samples": 0, "context_known_samples": 0,
+            "concurrency": [[] for _ in concurrent_bins], "context": [[] for _ in context_bins]})
+        group["samples"] += 1
+        tps = turn["output"] / c["seconds"]
+        sample = (tps, c["ttft_ms"])
+        overlap = area[c["timestamp"]] - area[c["interval_start"]]
+        width = ticks[c["timestamp"]] - ticks[c["interval_start"]]
+        index = 0 if overlap == width else 1 if overlap < 2 * width else 2 if overlap < 4 * width else 3
+        group["concurrency"][index].append(sample)
+        if turn["context_known"]:
+            peak = turn["context_peak"]
+            index = 0 if peak < 8000 else 1 if peak < 32000 else 2 if peak < 128000 else 3
+            group["context"][index].append(sample); group["context_known_samples"] += 1
+        else: context_unknown += 1
+    def rows(bins, buckets):
+        medians = [statistics.median(t for t, _ in bucket) if bucket else None for bucket in buckets]
+        base = medians[0]
+        result = []
+        for (key, label), bucket, median in zip(bins, buckets, medians):
+            ttfts = [v for _, v in bucket if v is not None]
+            delta = round((median - base) / base * 100, 2) if len(buckets[0]) >= 5 and len(bucket) >= 5 and base > 0 else None
+            result.append({"key": key, "label": label, "samples": len(bucket),
+                "median_tps": round(median, 2) if median is not None else None, "baseline_delta_pct": delta,
+                "ttft_median_ms": round(statistics.median(ttfts), 2) if ttfts else None, "ttft_samples": len(ttfts)})
+        return result
+    result = []
+    for (provider_name, model_name), group in groups.items():
+        result.append({"provider": provider_name, "model": model_name, "samples": group["samples"],
+            "context_known_samples": group["context_known_samples"],
+            "concurrency": rows(concurrent_bins, group["concurrency"]), "context": rows(context_bins, group["context"])})
+    result.sort(key=lambda row: (-row["samples"], row["provider"], row["model"]))
+    return {"min_comparison_samples": 5, "concurrency_pool_samples": len(pool),
+            "eligible_samples": sum(row["samples"] for row in result), "excluded_mixed_model_samples": mixed,
+            "excluded_unknown_model_samples": unknown, "context_unknown_samples": context_unknown, "groups": result}
 
 
 class UsageIndex:
@@ -652,10 +725,34 @@ class UsageIndex:
         # Complete turn output is assembled before applying dates or model filters.
         for event in scoped_events:
             key = (event["thread_id"], event["turn_id"])
-            turn = turns.setdefault(key, {"output": 0, "models": set(), "known": 0, "unknown": 0})
+            turn = turns.setdefault(key, {"output": 0, "models": set(), "known": 0, "unknown": 0, "context_known": True, "context_peak": 0})
             turn["output"] += event["output_tokens"]
+            turn["context_known"] &= event.get("_context_input_known", True)
+            turn["context_peak"] = max(turn["context_peak"], event["input_tokens"])
             turn["known" if event.get("reasoning_known", True) else "unknown"] += 1
             turn["models"].add(event["model"])
+        for record in records:
+            for sid, tid, ts in record.get("_context_unknown_turns", []):
+                if ts <= now.timestamp() and (sid, tid) in turns: turns[(sid, tid)]["context_known"] = False
+        # Zero-token records are absent from the ledger; preserve unknown input
+        # only when no selected ledger event already owns the response key.
+        context_seen = set(seen)
+        for owner_only in (True, False):
+            for record in records:
+                for event_key, sid, tid, ts in record.get("_context_unrecorded_usage", []):
+                    if event_key in context_seen or (owner_only and sid != record["id"]): continue
+                    context_seen.add(event_key)
+                    if ts <= now.timestamp() and (sid, tid) in turns: turns[(sid, tid)]["context_known"] = False
+        # A Codex file can contain copied completions predating its creation.
+        # Exclude these only from the new factor pool and cohorts.
+        factor_completions = {}
+        for key, completion in completions.items():
+            record_meta = meta.get(key[0], {}).get("meta", {})
+            created = stamp(record_meta.get("timestamp"))
+            if record_meta.get("provider") == "codex" and created is not None and completion["timestamp"] < created:
+                continue
+            factor_completions[key] = completion
+        speed_factors = calculate_speed_factors(factor_completions, turns, now.timestamp(), in_range, scope_matches, provider_for, origin_for, provider, origin, model)
         today_tokens = sum(event["total_tokens"] for event in matched_events
                            if datetime.fromtimestamp(event["timestamp"], self.tz).date() == today)
         for event in matched_events:
@@ -811,7 +908,7 @@ class UsageIndex:
                     "coverage": {"earliest_date": str(min(coverage_dates)) if coverage_dates else None,
                                  "latest_date": str(max(coverage_dates)) if coverage_dates else None,
                                  "matched_threads": len({event["thread_id"] for event in matched_events}), "scope": scope}},
-                "summary": summary, "daily": list(daily.values()), "speed_trends": speed_trends, "hourly": hourly, "week_over_week": week_over_week,
+                "summary": summary, "daily": list(daily.values()), "speed_trends": speed_trends, "speed_factors": speed_factors, "hourly": hourly, "week_over_week": week_over_week,
                 "sessions": sorted(grouped.values(), key=lambda s: s["total_tokens"], reverse=True),
                 "threads": sorted(sessions.values(), key=lambda s: s["total_tokens"], reverse=True),
                 "models": sorted(models.values(), key=lambda m: m["total_tokens"], reverse=True)}

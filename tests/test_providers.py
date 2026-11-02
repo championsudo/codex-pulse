@@ -92,6 +92,34 @@ class ProviderTests(unittest.TestCase):
     def test_claude_new_human_cannot_close_with_old_duplicate(self):
         rows=[self.cuser('u'),self.cassistant(),self.cuser('new',dt=30),self.cassistant(dt=35),self.cassistant('m2',dt=40)]
         self.write(self.claude/'projects'/'p'/'same.jsonl',rows);s=self.snapshot()['summary'];self.assertEqual(s['speed_samples'],2);self.assertEqual(s['speed_output_tokens'],40);self.assertEqual(s['active_seconds'],20)
+    def test_claude_context_input_follows_selected_message_snapshots(self):
+        rows=[self.cuser('old'),self.cassistant('m1',tokens={'input_tokens':9000,'output_tokens':20}),
+              self.cuser('new',dt=30),self.cassistant('m1',dt=35,tokens={'output_tokens':20}),
+              self.cassistant('m2',dt=40,tokens={'input_tokens':10000,'output_tokens':20})]
+        self.write(self.claude/'projects'/'p'/'same.jsonl',rows)
+        f=self.snapshot(provider='claude')['speed_factors']; self.assertEqual((f['eligible_samples'],f['context_unknown_samples']),(2,0))
+        self.assertEqual(f['groups'][0]['context'][1]['samples'],2)
+        rows=[self.cuser('old'),self.cassistant('m1',stop='tool_use'),self.cassistant('m2',dt=20,tokens={'input_tokens':9000,'output_tokens':20})]
+        del rows[1]['message']['usage']
+        self.write(self.claude/'projects'/'p'/'same.jsonl',rows)
+        f=self.snapshot(provider='claude')['speed_factors']; self.assertEqual((f['eligible_samples'],f['context_unknown_samples']),(1,1))
+        self.assertEqual(f['groups'][0]['context_known_samples'],0)
+        # A later valid snapshot for the same message replaces an incomplete one.
+        rows.insert(2,self.cassistant('m1',dt=15,stop='tool_use',tokens={'input_tokens':8000,'output_tokens':10}))
+        self.write(self.claude/'projects'/'p'/'same.jsonl',rows)
+        f=self.snapshot(provider='claude')['speed_factors']; self.assertEqual(f['context_unknown_samples'],0)
+
+    def test_claude_missing_message_replay_preserves_first_turn_ownership(self):
+        missing=self.cassistant('m1',dt=5,stop='tool_use'); del missing['message']['usage']
+        replay=self.cassistant('m1',dt=35,stop='tool_use'); del replay['message']['usage']
+        rows=[self.cuser('old'),self.cassistant('a',dt=3,stop='tool_use',tokens={'input_tokens':9000,'output_tokens':10}),
+              missing,self.cassistant('b',dt=10,tokens={'input_tokens':10000,'output_tokens':10}),
+              self.cuser('new',dt=30),replay,self.cassistant('c',dt=40,tokens={'input_tokens':64000,'output_tokens':10})]
+        self.write(self.claude/'projects'/'p'/'same.jsonl',rows)
+        f=self.snapshot(provider='claude')['speed_factors']; g=f['groups'][0]
+        self.assertEqual((f['eligible_samples'],f['context_unknown_samples'],g['context_known_samples']),(2,1,1))
+        self.assertEqual([row['samples'] for row in g['context']],[0,0,1,0])
+
     def test_claude_subagent_parent_and_coverage(self):
         self.write(self.claude/'projects'/'p'/'same.jsonl',[self.cuser('u'),self.cassistant(tokens={'input_tokens':1,'output_tokens':2,'output_tokens_details':{'thinking_tokens':0}})])
         self.write(self.claude/'projects'/'p'/'same'/'subagents'/'agent-child.jsonl',[self.cuser('u',agentId='child'),self.cassistant(agentId='child')]);self.link('claude')
