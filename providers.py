@@ -150,7 +150,7 @@ def paseo_links(home):
             provider = provider or top; native = persistence.get("sessionId")
             if provider in PROVIDERS and isinstance(native, str):
                 title = row.get("title")
-                links[(provider, native)] = {"title": title[:120] if isinstance(title, str) else None}
+                links[(provider, native)] = {"title": title.strip()[:120] if isinstance(title, str) else None}
         except (OSError, ValueError, TypeError, AttributeError):
             warnings.append("部分 Paseo 关联记录无法读取，下次刷新会重试。")
     return links, list(dict.fromkeys(warnings))

@@ -528,6 +528,10 @@ class UsageIndex:
             for log_record in parse_zcode_live(self.zcode_log_dir, now, self.zcode_live_cache) if self.zcode_log_dir else []:
                 original = zcode_records.get(log_record["id"])
                 if original is None:
+                    m = log_record["meta"]
+                    linked = self.paseo_associations.get(("zcode", m.get("native_session_id", log_record["id"])), {})
+                    if linked.get("title"): m["paseo_title"] = linked["title"]
+                    else: m.pop("paseo_title", None)
                     records.append(log_record)
                 else:
                     merged = {**original, "live_turns": log_record["live_turns"]}
@@ -572,8 +576,8 @@ class UsageIndex:
             def short_title(sid, category=None):
                 info = metadata.get(sid, {})
                 record_meta = meta.get(sid, {}).get("meta", {})
-                title = ((info.get("agent_path") or info.get("agent_nickname")) if category == "agent" else None)
-                title = title or info.get("title") or record_meta.get("title") or record_meta.get("paseo_title") or f"对话 {record_meta.get('native_session_id', sid)[:8]}"
+                title = record_meta.get("paseo_title") or ((info.get("agent_path") or info.get("agent_nickname")) if category == "agent" else None)
+                title = title or info.get("title") or record_meta.get("title") or f"对话 {record_meta.get('native_session_id', sid)[:8]}"
                 title = " ".join(str(title).split())
                 return title if len(title) <= 120 else title[:119] + "…"
 
@@ -708,7 +712,7 @@ class UsageIndex:
                          if lower.timestamp() <= timestamp <= upper.timestamp()), None)
         def ensure_session(sid, timestamp, model_name):
             info = metadata.get(sid, {}); record = meta.get(sid, {}); session_meta = record.get("meta", {})
-            session = sessions.setdefault(sid, {"id": sid, "provider": provider_for(sid), "origin": origin_for(sid), "title": info.get("title") or session_meta.get("title") or session_meta.get("paseo_title") or f"对话 {session_meta.get('native_session_id', sid)[:8]}",
+            session = sessions.setdefault(sid, {"id": sid, "provider": provider_for(sid), "origin": origin_for(sid), "title": session_meta.get("paseo_title") or info.get("title") or session_meta.get("title") or f"对话 {session_meta.get('native_session_id', sid)[:8]}",
                 "model": info.get("model") or model_name, "models": set(),
                 "first_seen": timestamp, "last_seen": timestamp,
                 "is_subagent": record.get("is_subagent", False), "parent_id": session_meta.get("parent_thread_id"),
@@ -835,7 +839,7 @@ class UsageIndex:
         for sid, thread in sessions.items():
             rid = root_for(sid); info = metadata.get(rid, {})
             group = grouped.setdefault(rid, {"id": rid, "provider": provider_for(sid), "origin": origin_for(sid),
-                "title": info.get("title") or (sessions.get(rid) or {}).get("title") or meta.get(rid, {}).get("meta", {}).get("title") or meta.get(rid, {}).get("meta", {}).get("paseo_title") or f"对话 {rid.removeprefix(provider_for(sid) + chr(58))[:8]}",
+                "title": meta.get(rid, {}).get("meta", {}).get("paseo_title") or info.get("title") or (sessions.get(rid) or {}).get("title") or meta.get(rid, {}).get("meta", {}).get("title") or f"对话 {rid.removeprefix(provider_for(sid) + chr(58))[:8]}",
                 "models": set(), "first_seen": thread["first_seen"], "last_seen": thread["last_seen"],
                 "is_subagent": False, "parent_id": None, "child_count": 0, "origins": set(),
                 "main_tokens": 0, "agent_tokens": 0, "review_tokens": 0, "_turns": [], **blank()})

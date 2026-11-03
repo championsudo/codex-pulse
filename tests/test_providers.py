@@ -5,6 +5,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from usage import UsageIndex
@@ -59,6 +60,49 @@ class ProviderTests(unittest.TestCase):
             rows=list(csv.reader(io.StringIO(export_csv(self.snapshot(provider='claude',origin='paseo'),kind).decode('utf-8-sig'))))
             self.assertIn('代理工具筛选',rows[0]); self.assertIn('Paseo关联筛选',rows[0]); self.assertEqual(rows[1][-2:],['claude','paseo'])
         self.assertNotIn(SECRET,json.dumps(data)); self.assertNotIn(SECRET,json.dumps(list(self.index.cache.values())))
+    def test_paseo_title_rename_and_fallback_across_views(self):
+        root = self.codex_log()
+        child = self.codex_log('child', parent='same')
+        for path, sid in ((root, 'same'), (child, 'child')):
+            with path.open('a') as stream:
+                stream.write(json.dumps({'type':'event_msg','timestamp':T+20,'payload':{'type':'task_started','turn_id':'live'}})+'\n')
+                stream.write(json.dumps({'type':'token_usage_record','timestamp':T+25,'payload':{'thread_id':sid,'response_id':'live-'+sid,'turn_id':'live','model':'model-x','usage':{'input_tokens':1,'output_tokens':2}}})+'\n')
+        with closing(sqlite3.connect(self.codex/'state_1.sqlite')) as conn, conn:
+            conn.execute('CREATE TABLE threads(id TEXT, title TEXT, agent_nickname TEXT, first_user_message TEXT)')
+            conn.execute('INSERT INTO threads VALUES(?,?,?,?)', ('same', 'Native old', None, SECRET))
+        (self.codex/'session_index.jsonl').write_text(json.dumps({'id':'same','thread_name':'Index old','updated_at':T})+'\n')
+        self.write(self.claude/'projects'/'p'/'same.jsonl',[self.cuser('u'),self.cassistant()])
+        link = self.link('codex', title='Paseo old')
+        old = self.snapshot()
+        before = root.stat()
+        def check(title, origin):
+            data = self.snapshot()
+            session = next(r for r in data['sessions'] if r['id'] == 'same')
+            thread = next(r for r in data['threads'] if r['id'] == 'same')
+            self.assertEqual((session['title'], thread['title']), (title, title))
+            self.assertEqual(next(r for r in data['threads'] if r['id'] == 'claude:same')['origin'], 'other')
+            live = self.index.live_snapshot(now=datetime.fromtimestamp(T+30,timezone.utc), provider='codex')
+            live_rows = {r['thread_id']:r for r in live['threads']}
+            self.assertEqual(live_rows['same']['title'], title)
+            self.assertEqual(live_rows['child']['root_title'], title)
+            self.assertEqual(live_rows['same']['origin'], origin)
+            for kind in ('sessions', 'turns'):
+                text = export_csv(data,kind).decode('utf-8-sig')
+                self.assertIn(title, text)
+                self.assertNotIn(SECRET, text)
+            self.assertNotIn(SECRET, json.dumps(data))
+            self.assertEqual(data['summary'], old['summary'])
+            return data
+        check('Paseo old', 'paseo')
+        self.link('codex', title='Paseo renamed')
+        renamed = check('Paseo renamed', 'paseo')
+        self.assertEqual((root.stat().st_size, root.stat().st_mtime_ns), (before.st_size, before.st_mtime_ns))
+        self.assertEqual(renamed['summary']['total_tokens'], old['summary']['total_tokens'])
+        self.link('codex', title='   ')
+        check('Index old', 'paseo')
+        link.unlink()
+        check('Index old', 'other')
+
     def test_paseo_multilevel_real_parent_and_independent_fork(self):
         self.codex_log();self.codex_log('child',source={'subagent':{'thread_spawn':{'parent_thread_id':'same'}}},root='child');self.codex_log('grand','child');self.link('codex')
         self.assertEqual(self.snapshot(origin='paseo')['summary']['thread_count'],3)

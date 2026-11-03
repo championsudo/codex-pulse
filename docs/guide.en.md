@@ -88,7 +88,7 @@ bash start.sh --port 8766 --timezone Asia/Shanghai --codex-home "/path/to/.codex
 
 ## Paseo and agent support
 
-The dashboard reads each agent's local logs and associates sessions using `provider` and `persistence.sessionId` in Paseo `agents` metadata; an available `title` can supplement the name. Paseo does not provide a second token ledger, so association does not add usage again. The dashboard does not read Paseo configuration, credentials or conversation text. It covers only this computer, not remote SSH logs or other agent tools.
+The dashboard reads each agent's local logs and associates sessions using `provider` and `persistence.sessionId` in Paseo `agents` metadata; a nonblank Paseo `title` takes display precedence; an empty title or removed association falls back to the original name. Paseo does not provide a second token ledger, so association does not add usage again. The dashboard does not read Paseo configuration, credentials or conversation text. It covers only this computer, not remote SSH logs or other agent tools.
 
 Agent tool (all / Codex / Claude Code / OpenCode / Z Code) and Paseo association (all / associated / unassociated) are independent filters. Association applies to the whole session: if an existing session is resumed or taken over, its history is also classified as associated, which does not prove it was originally created by Paseo. “Unassociated” means no matching local metadata was found, not that Paseo was never used. A conversation containing both associated and unassociated main or child threads is marked partially associated (`mixed` in CSV); filtering still uses each thread's actual association. Today's card, historical and live views, and CSV follow these filters; the live view is independent of the date range.
 

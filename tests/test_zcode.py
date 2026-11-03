@@ -114,6 +114,22 @@ class ZCodeTests(unittest.TestCase):
         self.assertNotIn(SECRET,json.dumps(data)); self.assertNotIn(SECRET,json.dumps(list(self.index.cache.values())))
         self.assertEqual(self.snapshot(provider='zcode')['summary']['total_tokens'],0)
 
+    def test_live_log_only_paseo_title_updates_and_falls_back(self):
+        self.write_log([self.log('turn.started',0)])
+        path=self.root/'paseo'/'agents'/'link.json'; path.parent.mkdir(parents=True)
+        def update(title):
+            path.write_text(json.dumps({'provider':'zcode','persistence':{'provider':'zcode','sessionId':'s'},'title':title}))
+        update('Paseo old')
+        self.assertEqual(self.live()['threads'][0]['title'], 'Paseo old')
+        update('Paseo new')
+        self.assertEqual(self.live()['threads'][0]['root_title'], 'Paseo new')
+        update('  ')
+        self.assertEqual(self.live()['threads'][0]['title'], '对话 s')
+        path.unlink()
+        data=self.live()
+        self.assertEqual((data['threads'][0]['title'],data['threads'][0]['origin']), ('对话 s','other'))
+        self.assertNotIn(SECRET,json.dumps(data))
+
     def test_explicit_database_does_not_read_unrelated_home_log(self):
         self.write_log([self.log('turn.started',0),self.log('tool.call.started',1,modelId='home-model')])
         other=self.root/'other'; db=other/'cli'/'db'/'db.sqlite'; fixture(db).close()

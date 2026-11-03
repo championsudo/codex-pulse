@@ -88,7 +88,7 @@ bash start.sh --port 8766 --timezone Asia/Shanghai --codex-home "/path/to/.codex
 
 ## Paseo 与多代理支持
 
-面板读取代理工具自己的本机日志，再用 Paseo 的 `agents` 元数据中的 `provider` 与 `persistence.sessionId` 关联会话；可用元数据中的 `title` 补充名称。Paseo 自身不提供额外一份 token 用量，关联不会重复累加。面板不读取 Paseo 配置、凭据或对话正文。只覆盖同一台电脑，不支持远程 SSH 上的日志，也不包含四个工具以外的代理。
+面板读取代理工具自己的本机日志，再用 Paseo 的 `agents` 元数据中的 `provider` 与 `persistence.sessionId` 关联会话；有效的 Paseo `title` 优先显示；标题为空或关联移除时回退到原有名称。Paseo 自身不提供额外一份 token 用量，关联不会重复累加。面板不读取 Paseo 配置、凭据或对话正文。只覆盖同一台电脑，不支持远程 SSH 上的日志，也不包含四个工具以外的代理。
 
 “代理工具”（全部 / Codex / Claude Code / OpenCode / Z Code）和“Paseo 关联”（全部 / 已关联 / 未关联）是两个独立筛选。Paseo 关联按整个会话分类；恢复或接管已存在会话后，历史记录也会归入已关联组，不能据此认定它最初由 Paseo 创建。“未关联”只表示本机未找到对应元数据，不证明从未使用过 Paseo。对话汇总若同时包含已关联和未关联的主线程 / 子线程，会显示“部分关联 Paseo”（CSV 为 `mixed`）；筛选仍按每条线程的实际关联状态计入。今日卡、历史、实时和 CSV 均沿用工具与关联筛选；实时区域仍不受日期范围影响。
 
