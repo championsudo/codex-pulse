@@ -77,7 +77,7 @@ bash start.sh --port 8766 --timezone Asia/Shanghai --codex-home "/path/to/.codex
 
 - `--port`：默认 `8765`，允许 `1024–65535`。遇到端口占用可改为 `8766`，浏览器地址也相应变化。
 - `--codex-home`：指定 `.codex` 数据根目录，其内应有 `sessions` / `archived_sessions` 等文件；不是某个单独日志文件。优先于环境变量 `CODEX_HOME`。
-- `--paseo-home`：Paseo 数据根目录，优先于 `PASEO_HOME`，否则为 `~/.paseo`；只读取其中 `agents/**/*.json` 的会话关联元数据。
+- `--paseo-home`：Paseo 数据根目录，优先于 `PASEO_HOME`，否则为 `~/.paseo`；只读取其中 `agents/**/*.json` 的会话关联元数据及 `projects/workspaces.json` 的工作区元数据。
 - `--claude-home`：Claude Code 数据根目录，优先于 `CLAUDE_CONFIG_DIR`，否则为 `~/.claude`；从其 `projects/**/*.jsonl` 读取记录（包括子代理文件）。这里应传 `.claude` 根目录，而不是 `projects` 或某个 JSONL 文件。
 - `--opencode-home`：OpenCode 数据根目录，默认 `$XDG_DATA_HOME/opencode`，未设置 `XDG_DATA_HOME` 时为 `~/.local/share/opencode`；读取其中 `opencode.db`。
 - `--zcode-home`：Z Code 根目录，默认 `~/.zcode`，读取 `cli/db/db.sqlite`。
@@ -88,7 +88,7 @@ bash start.sh --port 8766 --timezone Asia/Shanghai --codex-home "/path/to/.codex
 
 ## Paseo 与多代理支持
 
-面板读取代理工具自己的本机日志，再用 Paseo 的 `agents` 元数据中的 `provider` 与 `persistence.sessionId` 关联会话；有效的 Paseo `title` 优先显示；标题为空或关联移除时回退到原有名称。Paseo 自身不提供额外一份 token 用量，关联不会重复累加。面板不读取 Paseo 配置、凭据或对话正文。只覆盖同一台电脑，不支持远程 SSH 上的日志，也不包含四个工具以外的代理。
+面板读取代理工具自己的本机日志，再用 Paseo 的 `agents` 元数据中的 `provider` 与 `persistence.sessionId` 关联会话；读取字段限于 agent 的 `provider`、`persistence.provider`、`persistence.sessionId`、`workspaceId`、`title` 及工作区的 `workspaceId`、`title`。工作区和会话标题均有效时显示“工作区名 · 会话名”（相同时只显示一次），仅一个有效时单独显示；均无标题或关联移除时回退到原有名称。Paseo 自身不提供额外一份 token 用量，关联不会重复累加。面板不读取 Paseo 配置、凭据或对话正文。只覆盖同一台电脑，不支持远程 SSH 上的日志，也不包含四个工具以外的代理。
 
 “代理工具”（全部 / Codex / Claude Code / OpenCode / Z Code）和“Paseo 关联”（全部 / 已关联 / 未关联）是两个独立筛选。Paseo 关联按整个会话分类；恢复或接管已存在会话后，历史记录也会归入已关联组，不能据此认定它最初由 Paseo 创建。“未关联”只表示本机未找到对应元数据，不证明从未使用过 Paseo。对话汇总若同时包含已关联和未关联的主线程 / 子线程，会显示“部分关联 Paseo”（CSV 为 `mixed`）；筛选仍按每条线程的实际关联状态计入。今日卡、历史、实时和 CSV 均沿用工具与关联筛选；实时区域仍不受日期范围影响。
 

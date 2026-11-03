@@ -9,7 +9,7 @@ from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from usage import UsageIndex
-from providers import parse_claude, parse_opencode
+from providers import parse_claude, parse_opencode, paseo_links
 from server import export_csv
 
 NOW = datetime(2026, 10, 26, 12, tzinfo=timezone.utc)
@@ -72,7 +72,12 @@ class ProviderTests(unittest.TestCase):
             conn.execute('INSERT INTO threads VALUES(?,?,?,?)', ('same', 'Native old', None, SECRET))
         (self.codex/'session_index.jsonl').write_text(json.dumps({'id':'same','thread_name':'Index old','updated_at':T})+'\n')
         self.write(self.claude/'projects'/'p'/'same.jsonl',[self.cuser('u'),self.cassistant()])
-        link = self.link('codex', title='Paseo old')
+        link = self.link('codex', title='Paseo old', workspaceId='w1', content=SECRET)
+        registry = self.paseo/'projects'/'workspaces.json'
+        registry.parent.mkdir(parents=True)
+        def workspace(title):
+            registry.write_text(json.dumps([{'workspaceId':'w1','title':title,'displayName':SECRET}]))
+        workspace('Workspace old')
         old = self.snapshot()
         before = root.stat()
         def check(title, origin):
@@ -93,15 +98,52 @@ class ProviderTests(unittest.TestCase):
             self.assertNotIn(SECRET, json.dumps(data))
             self.assertEqual(data['summary'], old['summary'])
             return data
+        check('Workspace old · Paseo old', 'paseo')
+        link_before = link.read_bytes()
+        workspace('Workspace renamed')
+        renamed = check('Workspace renamed · Paseo old', 'paseo')
+        self.assertEqual(link.read_bytes(), link_before)
+        workspace('')
         check('Paseo old', 'paseo')
         self.link('codex', title='Paseo renamed')
-        renamed = check('Paseo renamed', 'paseo')
+        check('Paseo renamed', 'paseo')
         self.assertEqual((root.stat().st_size, root.stat().st_mtime_ns), (before.st_size, before.st_mtime_ns))
         self.assertEqual(renamed['summary']['total_tokens'], old['summary']['total_tokens'])
         self.link('codex', title='   ')
         check('Index old', 'paseo')
         link.unlink()
         check('Index old', 'other')
+
+    def test_paseo_workspace_mapping_and_invalid_registry(self):
+        self.link('codex', sid='one', name='one', title='Agent one', workspaceId='w1')
+        self.link('codex', sid='two', name='two', title='Agent two', workspaceId='w1')
+        self.link('codex', sid='three', name='three', title='Same', workspaceId='w2')
+        self.link('codex', sid='four', name='four', workspaceId='w2')
+        self.link('codex', sid='five', name='five', title='No workspace')
+        registry = self.paseo/'projects'/'workspaces.json'
+        registry.parent.mkdir(parents=True)
+        registry.write_text(json.dumps([{'workspaceId':'w1','title':'First','cwd':SECRET},
+            {'workspaceId':'w2','title':'Same','displayName':SECRET}]))
+        links, warnings = paseo_links(self.paseo)
+        self.assertFalse(warnings)
+        self.assertEqual([links[('codex', sid)]['title'] for sid in ('one','two','three','four','five')],
+                         ['First · Agent one','First · Agent two','Same','Same','No workspace'])
+        self.assertNotIn(SECRET, json.dumps(list(links.values())))
+        registry.write_text(json.dumps([{'workspaceId':'w1','title':'W' * 200}]))
+        links, _ = paseo_links(self.paseo)
+        self.assertEqual(len(links[('codex','one')]['title']), 120)
+        self.assertTrue(links[('codex','one')]['title'].endswith(' · Agent one'))
+        self.assertNotEqual(links[('codex','one')]['title'], links[('codex','two')]['title'])
+        for invalid in ('{', '{}'):
+            registry.write_text(invalid)
+            links, warnings = paseo_links(self.paseo)
+            self.assertTrue(warnings)
+            self.assertEqual(links[('codex','one')]['title'], 'Agent one')
+            self.assertEqual(len(links), 5)
+        registry.unlink()
+        links, warnings = paseo_links(self.paseo)
+        self.assertFalse(warnings)
+        self.assertEqual(links[('codex','one')]['title'], 'Agent one')
 
     def test_paseo_multilevel_real_parent_and_independent_fork(self):
         self.codex_log();self.codex_log('child',source={'subagent':{'thread_spawn':{'parent_thread_id':'same'}}},root='child');self.codex_log('grand','child');self.link('codex')

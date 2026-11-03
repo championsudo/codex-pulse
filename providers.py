@@ -139,6 +139,20 @@ def paseo_links(home):
         paths = list(base.rglob("*.json"))
     except OSError:
         return links, ["Paseo 关联目录无法读取。"]
+    workspaces = {}
+    workspace_path = Path(home) / "projects" / "workspaces.json"
+    try:
+        rows = json.loads(workspace_path.read_text(encoding="utf-8"))
+        if not isinstance(rows, list): raise ValueError("invalid workspace registry")
+        for row in rows:
+            if not isinstance(row, dict): continue
+            workspace_id, title = row.get("workspaceId"), row.get("title")
+            if isinstance(workspace_id, str) and isinstance(title, str) and title.strip():
+                workspaces[workspace_id] = title.strip()
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, TypeError):
+        warnings.append("Paseo 工作区标题无法读取，下次刷新会重试。")
     for path in paths:
         try:
             row = json.loads(path.read_text(encoding="utf-8"))
@@ -150,7 +164,15 @@ def paseo_links(home):
             provider = provider or top; native = persistence.get("sessionId")
             if provider in PROVIDERS and isinstance(native, str):
                 title = row.get("title")
-                links[(provider, native)] = {"title": title.strip()[:120] if isinstance(title, str) else None}
+                title = title.strip() if isinstance(title, str) else ""
+                workspace_id = row.get("workspaceId")
+                workspace_title = workspaces.get(workspace_id, "") if isinstance(workspace_id, str) else ""
+                if workspace_title and title and workspace_title != title:
+                    workspace_limit = max(58, 117 - len(title))
+                    combined = workspace_title[:workspace_limit] + " · " + title[:117 - min(len(workspace_title), workspace_limit)]
+                else:
+                    combined = workspace_title or title
+                links[(provider, native)] = {"title": combined[:120] or None}
         except (OSError, ValueError, TypeError, AttributeError):
             warnings.append("部分 Paseo 关联记录无法读取，下次刷新会重试。")
     return links, list(dict.fromkeys(warnings))
